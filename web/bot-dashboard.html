@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" data-i18n-page="bot">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bot — Robinhood Agentic Console</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/theme.css?v=20260529l" />
+</head>
+<body class="app-body app-scroll">
+
+  <nav class="navbar navbar-expand-lg navbar-dark app-navbar sticky-top">
+    <div class="container-fluid px-3">
+      <a class="navbar-brand" href="/" data-i18n="app.name">Robinhood Agentic Console</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navMain">
+        <ul id="app-nav" class="navbar-nav ms-auto align-items-lg-center gap-lg-1" data-bot-switcher="true"></ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid py-4 px-3 px-lg-4">
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+      <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> <span data-i18n="nav.backToDashboard">Dashboard</span></a>
+      <h1 id="bot-title" class="h4 mb-0" data-i18n="bot.titleDefault">Bot</h1>
+      <span id="bot-sched-badge" class="badge text-bg-secondary" data-i18n="common.emDash">—</span>
+      <span id="bot-sim-badge" class="badge text-bg-info d-none" data-i18n="bot.badgeSimulation">Simulation</span>
+    </div>
+
+    <div id="profile-gate-banner" class="d-none mb-4"></div>
+
+    <section id="portfolio-panel" class="mb-3">
+      <div id="portfolio-loading" class="rh-card p-4 text-center text-secondary">
+        <div class="spinner-border spinner-border-sm text-success me-2" role="status"></div>
+        <span data-i18n="portfolio.loading">Loading Portfolio…</span>
+      </div>
+      <div id="portfolio-content" class="d-none">
+        <div id="sim-mode-banner" class="alert alert-info py-2 px-3 mb-3 d-none" data-i18n-html="portfolio.simBannerHtml"></div>
+
+        <div class="small text-secondary fw-semibold mb-1" id="live-kpi-label" data-i18n="portfolio.liveAccountLabel">Live account</div>
+        <div class="row g-3 mb-3" id="portfolio-kpis"></div>
+
+        <div id="sim-kpis-block" class="d-none">
+          <div class="small text-info fw-semibold mb-1" data-i18n="portfolio.simPortfolioLabel">Simulated portfolio</div>
+          <div class="row g-3 mb-3" id="portfolio-kpis-sim"></div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-xl-8">
+            <div class="rh-card h-100">
+              <div class="rh-card-head d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-pie-chart me-1"></i> <span data-i18n="portfolio.holdingsTitle">Holdings</span></span>
+                <span id="portfolio-as-of" class="small text-secondary fw-normal"></span>
+              </div>
+              <div id="holdings-wrap" class="table-responsive">
+                <table class="table table-dark table-hover table-sm mb-0 align-middle">
+                  <thead>
+                    <tr class="text-secondary small">
+                      <th data-i18n="common.symbol">Symbol</th>
+                      <th class="text-end" data-i18n="common.qty">Qty</th>
+                      <th class="text-end" data-i18n="common.avgCost">Avg Cost</th>
+                      <th class="text-end" data-i18n="common.last">Last</th>
+                      <th class="text-end" data-i18n="common.value">Value</th>
+                      <th class="text-end" data-i18n="common.unrealized">Unrealized</th>
+                      <th class="text-end" data-i18n="common.day">Day</th>
+                    </tr>
+                  </thead>
+                  <tbody id="holdings-body"></tbody>
+                </table>
+              </div>
+              <div id="holdings-empty" class="p-4 text-center text-secondary d-none">
+                <i class="bi bi-inbox fs-4 d-block mb-2 opacity-50"></i>
+                <span data-i18n="portfolio.holdingsEmpty">No Open Positions — Cash Only</span>
+              </div>
+              <div id="sim-holdings-section" class="d-none border-top border-secondary mt-0">
+                <div class="px-3 pt-2 pb-1 small text-info fw-semibold" data-i18n="portfolio.simHoldingsTitle">Simulated holdings</div>
+                <div id="sim-holdings-wrap" class="table-responsive">
+                  <table class="table table-dark table-hover table-sm mb-0 align-middle">
+                    <thead>
+                      <tr class="text-secondary small">
+                        <th data-i18n="common.symbol">Symbol</th>
+                        <th class="text-end" data-i18n="common.qty">Qty</th>
+                        <th class="text-end" data-i18n="common.avgCost">Avg Cost</th>
+                        <th class="text-end" data-i18n="common.last">Last</th>
+                        <th class="text-end" data-i18n="common.value">Value</th>
+                        <th class="text-end" data-i18n="common.unrealized">Unrealized</th>
+                        <th class="text-end" data-i18n="common.day">Day</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sim-holdings-body"></tbody>
+                  </table>
+                </div>
+                <div id="sim-holdings-empty" class="p-4 text-center text-secondary d-none">
+                  <i class="bi bi-inbox fs-4 d-block mb-2 opacity-50"></i>
+                  <span data-i18n="portfolio.simHoldingsEmpty">No simulated positions — paper cash only</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-xl-4">
+            <div class="rh-card mb-3">
+              <div class="rh-card-head"><i class="bi bi-sliders me-1"></i> <span data-i18n="portfolio.allocationTitle">Allocation</span></div>
+              <div class="p-3">
+                <div class="d-flex justify-content-between small mb-1">
+                  <span class="text-secondary" data-i18n="common.invested">Invested</span>
+                  <span id="alloc-invested-label" data-i18n="common.emDash">—</span>
+                </div>
+                <div class="progress mb-3" style="height: 0.5rem;">
+                  <div id="alloc-invested-bar" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="d-flex justify-content-between small mb-1">
+                  <span class="text-secondary" data-i18n="common.cash">Cash</span>
+                  <span id="alloc-cash-label" data-i18n="common.emDash">—</span>
+                </div>
+                <div class="progress" style="height: 0.5rem;">
+                  <div id="alloc-cash-bar" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div id="sim-alloc-block" class="d-none mt-3 pt-3 border-top border-secondary">
+                  <div class="small text-info fw-semibold mb-2" data-i18n="portfolio.simAllocationTitle">Simulated allocation</div>
+                  <div class="d-flex justify-content-between small mb-1">
+                    <span class="text-secondary" data-i18n="common.invested">Invested</span>
+                    <span id="sim-alloc-invested-label" data-i18n="common.emDash">—</span>
+                  </div>
+                  <div class="progress mb-3" style="height: 0.5rem;">
+                    <div id="sim-alloc-invested-bar" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                  </div>
+                  <div class="d-flex justify-content-between small mb-1">
+                    <span class="text-secondary" data-i18n="common.cash">Cash</span>
+                    <span id="sim-alloc-cash-label" data-i18n="common.emDash">—</span>
+                  </div>
+                  <div class="progress" style="height: 0.5rem;">
+                    <div id="sim-alloc-cash-bar" class="progress-bar bg-secondary" role="progressbar" style="width: 0%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="rh-card">
+              <div class="rh-card-head"><i class="bi bi-graph-up-arrow me-1"></i> <span data-i18n="portfolio.performanceTitle">Bot Performance</span></div>
+              <div class="p-3">
+                <div class="row g-2 mb-3 small">
+                  <div class="col-6">
+                    <div class="border border-secondary rounded p-2 h-100">
+                      <div class="text-secondary" data-i18n="common.runs">Runs</div>
+                      <div id="perf-runs" class="fs-5 fw-semibold" data-i18n="common.emDash">—</div>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="border border-secondary rounded p-2 h-100">
+                      <div class="text-secondary" data-i18n="common.success">Success</div>
+                      <div id="perf-success" class="fs-5 fw-semibold" data-i18n="common.emDash">—</div>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="border border-secondary rounded p-2 h-100">
+                      <div class="text-secondary" data-i18n="common.trades">Trades</div>
+                      <div id="perf-trades" class="fs-5 fw-semibold" data-i18n="common.emDash">—</div>
+                      <div id="perf-trades-sim" class="small text-info d-none"></div>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="border border-secondary rounded p-2 h-100">
+                      <div class="text-secondary" data-i18n="common.trend">Trend</div>
+                      <div id="perf-change" class="fs-6 fw-semibold" data-i18n="common.emDash">—</div>
+                      <div id="perf-change-sim" class="small d-none"></div>
+                    </div>
+                  </div>
+                </div>
+                <div style="height: 72px;"><canvas id="portfolio-sparkline"></canvas></div>
+                <div id="perf-actions" class="d-flex flex-wrap gap-1 mt-3"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="portfolio-unavailable" class="alert alert-secondary d-none mb-0">
+        <i class="bi bi-info-circle me-1"></i>
+        <span data-i18n="portfolio.errorUnavailable">Portfolio data unavailable. Connect Robinhood or run a cycle to refresh.</span>
+      </div>
+    </section>
+
+    <ul class="nav nav-tabs mb-3" id="bot-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" type="button" data-tab="overview" role="tab" data-i18n="common.overview">Overview</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" type="button" data-tab="config" role="tab" data-i18n="common.configuration">Configuration</button>
+      </li>
+    </ul>
+
+    <div id="panel-overview">
+      <div class="row g-3 mb-3">
+        <div class="col-lg-6">
+          <div class="rh-card">
+            <div class="rh-card-head" data-i18n="bot.schedulerTitle">Scheduler</div>
+            <div class="p-3">
+              <p id="scheduler-status" class="text-secondary mb-3" data-i18n="common.loading">Loading…</p>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-success btn-sm" onclick="runNow()">
+                  <i class="bi bi-play-fill"></i> <span data-i18n="bot.actionRunCycle">Run Cycle</span>
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" id="start-btn" onclick="toggleStart()" data-i18n="bot.actionStart">Start</button>
+                <button class="btn btn-outline-secondary btn-sm" id="pause-btn" onclick="togglePause()" data-i18n="bot.actionPause">Pause</button>
+                <a id="agents-link" class="btn btn-outline-secondary btn-sm" href="#" data-i18n="bot.allRuns">All Runs</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="rh-card">
+            <div class="rh-card-head" data-i18n="bot.limitsTitle">Risk Limits</div>
+            <div class="rh-scroll p-3" style="max-height: 220px;">
+              <div id="limits"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rh-card">
+        <div class="rh-card-head d-flex justify-content-between align-items-center">
+          <span data-i18n="bot.recentRuns">Recent Runs</span>
+          <a id="all-runs-link" class="btn btn-sm btn-outline-secondary" href="#"><span data-i18n="bot.openAllRuns">Open All Runs</span> <i class="bi bi-arrow-right"></i></a>
+        </div>
+        <div id="runs" class="list-group list-group-flush"></div>
+      </div>
+    </div>
+
+    <div id="panel-configuration" class="d-none" style="max-width: 960px;">
+      <div class="rh-card mb-3">
+        <div class="rh-card-head" data-i18n="bot.infoTitle">Bot Info</div>
+        <div class="p-3">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label mb-1" data-i18n="bot.displayNameLabel">Display name</label>
+              <input id="bot-name" type="text" class="form-control form-control-sm" maxlength="80" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label mb-1" data-i18n="bot.botIdLabel">Bot ID</label>
+              <div class="input-group input-group-sm">
+                <input id="bot-id-input" type="text" class="form-control font-monospace" maxlength="64" />
+                <button class="btn btn-outline-secondary" type="button" id="bot-slug-btn" onclick="generateBotSlug()" data-i18n-title="bot.botIdHintDefault" aria-label="Refresh bot ID from display name">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+              <div class="form-text mb-0 d-none" id="bot-id-hint" data-i18n="bot.botIdHintDefault">RobinBot is always default</div>
+            </div>
+            <div class="col-12">
+              <button class="btn btn-success btn-sm" onclick="saveBotDetails()" data-i18n="bot.saveBotInfo">Save Bot Info</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rh-card mb-3">
+        <div class="rh-card-head" data-i18n="bot.strategyTitle">Strategy</div>
+        <div class="p-3">
+          <textarea id="strategy" class="form-control font-monospace mb-2" rows="10"></textarea>
+          <button class="btn btn-success btn-sm" onclick="saveStrategy()" data-i18n="bot.saveStrategy">Save Strategy</button>
+        </div>
+      </div>
+
+      <div class="rh-card mb-3">
+        <div class="rh-card-head" data-i18n="bot.riskScheduler">Risk & Scheduler</div>
+        <div class="p-3">
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="bot.maxOrderPer">Max $ Per Order</label>
+              <input id="max-order" type="number" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="limits.maxDailyLoss">Max Daily Loss</label>
+              <input id="max-loss" type="number" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="bot.symbolsComma">Symbols (Comma, Empty = All)</label>
+              <input id="symbols" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="limits.maxOpenPositions">Max Open Positions</label>
+              <input id="max-positions" type="number" min="1" max="100" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="bot.cycleIntervalSec">Cycle Interval (Sec)</label>
+              <input id="interval" type="number" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="bot.modelLabel">Cursor model</label>
+              <input id="model" class="form-control form-control-sm" list="cursor-api-models" oninput="updateModelBillingWarning()" />
+              <datalist id="cursor-api-models"></datalist>
+              <div class="form-text" data-i18n="bot.modelHint">Most models bill against API usage. Composer and Auto use your IDE subscription quota instead.</div>
+              <div id="model-subscription-warning" class="form-text text-warning d-none" data-i18n="bot.modelSubscriptionWarning">
+                This model bills against Cursor Auto + Composer usage, not API usage.
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="bot.maxRunsLabel">Max Runs</label>
+              <input id="max-runs" type="number" min="1" class="form-control form-control-sm" data-i18n-placeholder="bot.maxRunsPlaceholder" />
+              <div class="form-text" data-i18n="bot.maxRunsHintIndefinite">Leave blank to run indefinitely.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" data-i18n="limits.minTimeBetweenOrders">Min Time Between Orders</label>
+              <input id="min-gap" type="number" class="form-control form-control-sm" />
+            </div>
+          </div>
+          <div class="form-check mb-2">
+            <input id="simulation-mode" type="checkbox" class="form-check-input" onchange="toggleSimConfigFields()" />
+            <label class="form-check-label" for="simulation-mode" data-i18n="bot.simulationMode">Simulation Mode</label>
+            <div class="form-text" data-i18n="bot.simModeHint">Paper trades only — strategy runs apply fictional orders and track simulated P/L.</div>
+          </div>
+          <div id="sim-cash-block" class="mb-3 d-none">
+            <div class="form-check mb-2">
+              <input id="sim-include-live" type="checkbox" class="form-check-input" />
+              <label class="form-check-label" for="sim-include-live" data-i18n="bot.includeLivePortfolio">Include Live Portfolio In Cycles</label>
+              <div class="form-text" data-i18n="bot.includeLivePortfolioHint">When off, cycles use paper holdings only and hide live broker order history (recommended).</div>
+            </div>
+            <label class="form-label" for="sim-cash-start" data-i18n="bot.simCashLabel">Simulated Cash Starting Value</label>
+            <div class="input-group input-group-sm" style="max-width: 16rem;">
+              <span class="input-group-text">$</span>
+              <input id="sim-cash-start" type="number" min="1" step="0.01" class="form-control" data-i18n-placeholder="bot.simCashPlaceholder" />
+            </div>
+            <div class="form-text" data-i18n="bot.simCashResetHint">Starting paper cash. Leave blank to seed from the live account. Reset uses the value shown here (Save not required).</div>
+            <button class="btn btn-outline-warning btn-sm mt-2" type="button" onclick="resetSimulation()">
+              <i class="bi bi-arrow-counterclockwise me-1"></i><span data-i18n="bot.resetSimulation">Reset Simulation</span>
+            </button>
+            <div class="form-text mt-1" data-i18n="bot.simResetHint">Clears paper holdings, wipes run history, and re-seeds from the starting value above.</div>
+          </div>
+          <div class="form-check mb-2">
+            <input id="market-hours" type="checkbox" class="form-check-input" />
+            <label class="form-check-label" for="market-hours" data-i18n="bot.marketHoursOnly">Market Hours Only</label>
+          </div>
+          <div class="form-check mb-3">
+            <input id="auto-start" type="checkbox" class="form-check-input" />
+            <label class="form-check-label" for="auto-start" data-i18n="bot.autoStartScheduler">Auto-Start Scheduler On Launch</label>
+          </div>
+          <button class="btn btn-success btn-sm" onclick="saveBotConfig()" data-i18n="bot.saveConfiguration">Save Configuration</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast rh-toast text-bg-dark border border-success" role="alert">
+    <div class="toast-body"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/static/i18n.js?v=20260529l"></script>
+  <script src="/static/app.js?v=20260529l"></script>
+  <script src="/static/footer.js?v=20260529l"></script>
+  <script src="/static/bot-dashboard.js?v=20260529l"></script>
+</body>
+</html>

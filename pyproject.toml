@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robinhood-agentic-bot"
+version = "0.2.0"
+description = "Cursor-powered Robinhood Agentic Trading bot with local dashboard"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cursor-sdk",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pyyaml>=6.0",
+    "mcp>=1.9",
+    "httpx>=0.28",
+    "keyring>=25.0",
+    "python-dotenv>=1.0",
+    "pydantic>=2.0",
+    "aiofiles>=24.0",
+    "tzdata>=2024.1",
+]
+
+[project.scripts]
+robinhood-bot = "runner.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "runner*", "mcp_servers*"]

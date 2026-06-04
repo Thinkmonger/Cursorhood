@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" data-i18n-page="dashboard">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard — Robinhood Agentic Console</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/theme.css?v=20260529l" />
+</head>
+<body class="app-body app-scroll">
+
+  <nav class="navbar navbar-expand-lg navbar-dark app-navbar sticky-top">
+    <div class="container-fluid px-3">
+      <a class="navbar-brand" href="/" data-i18n="app.name">Robinhood Agentic Console</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navMain">
+        <ul id="app-nav" class="navbar-nav ms-auto align-items-lg-center gap-lg-1"></ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid py-4 px-3 px-lg-4">
+
+    <div id="setup-banner" class="alert alert-warning d-none mb-4" role="alert" data-i18n-html="dashboard.setupBannerHtml"></div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+      <div>
+        <h1 class="h4 mb-1" data-i18n="nav.dashboard">Dashboard</h1>
+        <p class="text-secondary small mb-0" data-i18n="dashboard.subtitle">Your trading bots and shared account connections.</p>
+      </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-4" id="dash-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" type="button" data-tab="overview" role="tab" data-i18n="common.overview">Overview</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" type="button" data-tab="config" role="tab" data-i18n="common.configuration">Configuration</button>
+      </li>
+    </ul>
+
+    <div id="panel-overview">
+      <div class="d-flex justify-content-end mb-3">
+        <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addBotModal">
+          <i class="bi bi-plus-lg"></i> <span data-i18n="dashboard.addBot">Add bot</span>
+        </button>
+      </div>
+      <div id="bots-grid" class="row g-3"></div>
+    </div>
+
+    <div id="panel-configuration" class="d-none" style="max-width: 720px;">
+      <div class="rh-card">
+        <div class="rh-card-head" data-i18n="dashboard.connectionsTitle">Connections</div>
+        <div class="p-3">
+          <p class="text-secondary small mb-3" data-i18n="dashboard.connectionsHint">Shared by all bots — Cursor API key, Massive market data, and Robinhood account.</p>
+          <div id="conn-chips" class="d-flex flex-wrap gap-2 mb-3"></div>
+          <div class="mb-3">
+            <label class="form-label" data-i18n="dashboard.cursorKeyLabel">Cursor API key</label>
+            <input id="cursor-key" type="password" class="form-control form-control-sm" data-i18n-placeholder="dashboard.cursorKeyPlaceholder" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" data-i18n="dashboard.massiveKeyLabel">Massive API key</label>
+            <input id="massive-key" type="password" class="form-control form-control-sm" data-i18n-placeholder="dashboard.massiveKeyPlaceholder" />
+            <div class="form-text" data-i18n="dashboard.massiveKeyHint">1-hour bars for bot cycles. Free tier: 5 API calls/minute.</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mb-0">
+            <button class="btn btn-success btn-sm" onclick="saveKey()" data-i18n="dashboard.saveValidate">Save & validate</button>
+            <button class="btn btn-success btn-sm" onclick="saveMassiveKey()" data-i18n="dashboard.saveMassive">Save Massive key</button>
+            <button class="btn btn-primary btn-sm" onclick="connectRh()" data-i18n="dashboard.connectRobinhood">Connect Robinhood</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="useCursorMcp()" data-i18n="dashboard.useCursorMcp">Use Cursor MCP</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="testRh()" data-i18n="dashboard.testMcp">Test MCP</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="testMassive()" data-i18n="dashboard.testMassive">Test Massive</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="restartServer()" data-i18n="dashboard.restartServer">Restart server</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="disconnectRh()" data-i18n="dashboard.disconnect">Disconnect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="modal fade" id="addBotModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark border-secondary">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title" data-i18n="dashboard.modalAddBotTitle">Add bot</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <label class="form-label" data-i18n="dashboard.botNameLabel">Bot name</label>
+          <input id="new-bot-name" type="text" class="form-control" data-i18n-placeholder="dashboard.botNamePlaceholder" />
+          <p class="text-secondary small mt-2 mb-0" data-i18n="dashboard.cloneHint">Clones strategy and limits from the default bot.</p>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal" data-i18n="common.cancel">Cancel</button>
+          <button type="button" class="btn btn-success btn-sm" onclick="createBot()" data-i18n="common.create">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast rh-toast text-bg-dark border border-success" role="alert">
+    <div class="toast-body"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/static/i18n.js?v=20260529l"></script>
+  <script src="/static/app.js?v=20260529l"></script>
+  <script src="/static/footer.js?v=20260529l"></script>
+  <script src="/static/dashboard.js?v=20260529l"></script>
+</body>
+</html>

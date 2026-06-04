@@ -1,0 +1,8 @@
+-Loop: Scan symbols. Fetch 1h and 1d candle aggregates (OHLCV) via Massive. Calculate 20-period SMA on 1h close locally.
+-Entry: If holdings==0 AND 1h close < 1h open (1h Down Candle) AND 1h close > 1h 20SMA AND 1d close > 1d open (Daily Up Trend) -> Market Buy Max($5, 5% equity).
+-Limits: Max exposure per symbol <= 20% equity to protect against sector-wide correlation drops. Max open positions = 4. 
+-Profit/Breakout: Track current price vs current average cost.
+-> If current price >= current average cost + 5%: Execute Market Sell.
+-> If 1h close > 1h 20SMA * 1.05 (Proxy Upper Band) AND current price > current average cost + 3%: Activate Trailing Stop 2% behind peak price post-breakout. Execute Market Sell if trail hits. Ignore trail if spanning market close.
+-DCA: If price drops >= 3.5% below current Average Cost -> Market Buy Max($5, 5% equity) to accumulate on high-beta tech pullbacks. Limit 1 fill per symbol per cycle.
+-Stop Loss: If position value drops >= 7% below current Average Cost -> Market liquidate.

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" data-i18n-page="runs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runs — Robinhood Agentic Console</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/theme.css?v=20260529l" />
+</head>
+<body class="app-body app-fixed">
+
+  <nav class="navbar navbar-expand-lg navbar-dark app-navbar">
+    <div class="container-fluid px-3">
+      <a class="navbar-brand" href="/" data-i18n="app.name">Robinhood Agentic Console</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navMain">
+        <ul id="app-nav" class="navbar-nav ms-auto align-items-lg-center gap-lg-1" data-bot-switcher="true"></ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="agents-frame">
+
+    <div id="profile-gate-banner" class="d-none"></div>
+    <div class="agents-toolbar rh-card">
+      <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center gap-3">
+        <a id="back-dash" class="btn btn-outline-secondary btn-sm" href="/"><i class="bi bi-arrow-left"></i> <span data-i18n="nav.backToDashboard">Dashboard</span></a>
+        <span id="bot-label" class="text-secondary small"></span>
+        <span id="agent-state" class="badge rounded-pill text-bg-secondary" data-i18n="agents.stateIdle">idle</span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-success btn-sm" onclick="runNow()">
+            <i class="bi bi-play-fill"></i> <span data-i18n="agents.runCycle">Run cycle</span>
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="restartServer()">
+            <i class="bi bi-arrow-clockwise"></i> <span data-i18n="agents.restart">Restart</span>
+          </button>
+        </div>
+        <div class="form-check form-switch mb-0 ms-auto">
+          <input class="form-check-input" type="checkbox" id="follow" checked />
+          <label class="form-check-label text-secondary small" for="follow" data-i18n="agents.followLive">Follow live run</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="agents-grid">
+
+      <aside class="rh-card">
+        <div class="rh-card-head d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-list-ul me-1"></i> <span data-i18n="pages.runs">Runs</span></span>
+          <span id="run-count" class="badge text-bg-secondary">0</span>
+        </div>
+        <div id="run-list-scroll" class="rh-scroll">
+          <div id="run-list" class="list-group list-group-flush"></div>
+        </div>
+      </aside>
+
+      <div class="agents-detail">
+
+        <section class="rh-card agents-summary-panel">
+          <div class="rh-card-head d-flex justify-content-between align-items-center gap-2">
+            <span><i class="bi bi-card-text me-1"></i> <span data-i18n="agents.summaryTitle">Summary</span></span>
+            <span id="summary-meta" class="text-secondary small text-truncate" data-i18n="agents.selectRunTitle">Select a run</span>
+          </div>
+          <div id="summary-scroll" class="rh-scroll p-3">
+            <div id="summary-stats" class="row g-2 mb-2"></div>
+            <div id="summary" class="summary-body text-light" data-i18n="agents.selectRunBody">Select a run from the list.</div>
+          </div>
+        </section>
+
+        <section class="rh-card agents-activity-panel">
+          <div class="rh-card-head">
+            <i class="bi bi-activity me-1"></i> <span data-i18n="agents.activityTitle">Activity</span>
+          </div>
+          <div id="activity-scroll" class="rh-scroll p-2">
+            <div id="stream"></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast rh-toast text-bg-dark border border-success" role="alert">
+    <div class="toast-body"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/i18n.js?v=20260529l"></script>
+  <script src="/static/app.js?v=20260529l"></script>
+  <script src="/static/footer.js?v=20260529l"></script>
+  <script src="/static/agents.js?v=20260529l"></script>
+</body>
+</html>

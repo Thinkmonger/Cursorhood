@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "robinhood-trading": {
+      "command": "D:\\Robinhood\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "mcp_servers.trading.server"],
+      "env": {
+        "ROBINHOOD_MCP_TOKEN": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIiLCJ0eXAiOiJKV1QifQ.eyJhZ2VudF9pZCI6IjliNmVjMTNjLWM5YWUtNGNhOC1iMDg2LTFhODk1OTAwNmEwNCIsImRldmljZV9oYXNoIjoiIiwiZXhwIjoxNzgxMDM0NDA1LCJpc3MiOiJodHRwczovL2FwaS5yb2Jpbmhvb2QuY29tIiwibGV2ZWwyX2FjY2VzcyI6ZmFsc2UsIm1ldGEiOnsib2lkIjoiTHRMaU5tYnM5b3diWWZXZ0JsQzY4WjJWdWpJUHV2R29BaVNZcjh4VyIsIm9uIjoiUm9iaW5ob29kIFRyYWRpbmcgTUNQIn0sIm5zIjoiUkgiLCJvcHRpb25zIjp0cnVlLCJzY29wZSI6ImludGVybmFsIiwic2VydmljZV9yZWNvcmRzIjpbeyJoYWx0ZWQiOmZhbHNlLCJzZXJ2aWNlIjoiYnJva2ViYWNrX3VzIiwic2hhcmRfaWQiOjE0LCJzdGF0ZSI6ImF2YWlsYWJsZSJ9LHsiaGFsdGVkIjpmYWxzZSwic2VydmljZSI6ImNlcmVzX3VzIiwic2hhcmRfaWQiOjEsInN0YXRlIjoiYXZhaWxhYmxlIn0seyJoYWx0ZWQiOmZhbHNlLCJzZXJ2aWNlIjoibnVtumXVzX3VzIiwic2hhcmRfaWQiOjEsInN0YXRlIjoiYXZhaWxhYmxlIn1dLCJzbGciOjEsInNscyI6ImJteDFrYnJTTHA3WUwwR1ZqUWNtRVlPalZFUEpnTldycUVWOXNOaCtjK3ZjdVJlbVRtYTc4UURBYkUyWGxiTU5ZUjZPZ2JHUTgvYmZ6NjJJczd6VURBPT0iLCJzcm0iOnsiYiI6eyJobCI6ZmFsc2UsInIiOiJ1cyIsInNpZCI6MTR9LCJjIjp7ImhsIjpmYWxzZSwiciI6InVzIiwic2lkIjoxfSwibiI6eyJobCI6ZmFsc2UsInIiOiJ1cyIsInNpZCI6MX19LCJ0b2tlbiI6IkpQdG5EeldYdkNkMXdwV3ZMclFIYWdXblJMOHRKYSIsInVzZXJfaWQiOiI3ZDY3NjM4Zi01NTAzLTRiMTMtYTUwYi1lYmJlNjEwZjhlOTYiLCJ1c2VyX29yaWdpbiI6IlVTIn0.f648Rjps5lASjW823sXhlda1MtO-riqZpmGiVEoWe8ZssT9Oh1gZAV1EiQV6byD873-GaKk-sMlj-vRTwWprsQ",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "cwd": "D:\\Robinhood"
+    },
+    "robinhood-status": {
+      "command": "D:\\Robinhood\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "mcp_servers.status.server"],
+      "cwd": "D:\\Robinhood"
+    }
+  }
+}

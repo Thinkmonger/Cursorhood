@@ -1,0 +1,7 @@
+-Loop: 1h cycle. Sync-fetch equity, positions, real-time quotes. Eval up to 5 new high-volatility symbols.
+-Entry: If holdings==0 AND 1h price < 1h 20SMA AND SPY daily > 50SMA -> Buy 10% portfolio equity (or max cash available).
+-Limits: Max exposure per symbol <= 25% portfolio equity (ensures DCA headroom). Max open positions = 5.
+-DCA: If price drops > 5% below current Average Cost -> Buy 50% of current position value to average down. Floor updates dynamically post-execution. Max 2 fills per symbol per cycle.
+-Profit Taking: On buy execution, immediately place standing Limit Sell at current average cost + 3.5% for mid-cycle exit. Recalculates dynamically if DCA updates average cost.
+-Stop Loss: If position drops > 15% below current Average Cost -> Market liquidate.
+-Orders: Cancel unexecuted Buy Limit orders after 2 cycles (2 hours).

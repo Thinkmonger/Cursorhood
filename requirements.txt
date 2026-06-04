@@ -1,0 +1,10 @@
+cursor-sdk
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pyyaml>=6.0
+mcp>=1.9
+httpx>=0.28
+keyring>=25.0
+python-dotenv>=1.0
+pydantic>=2.0
+aiofiles>=24.0
