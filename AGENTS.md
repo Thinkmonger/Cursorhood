@@ -13,3 +13,28 @@ Crypto 24/7; `market_hours_only` = US equities only. Uncertain → no action + r
 ## MCP
 - **robinhood-trading** — market data and orders
 - **robinhood-status** — `log_event` only
+
+## Cursor Cloud specific instructions
+
+Single-process Python app (FastAPI + Uvicorn). No Docker, Node build, or separate DB server.
+
+### Run the dashboard
+
+```bash
+source .venv/bin/activate
+python -m runner.main
+```
+
+Default URL: `http://127.0.0.1:8765/` (`DASHBOARD_PORT` / `config/global.yaml`). One-shot cycle: `python -m runner.main run-once [--bot <id>]`.
+
+### VM prerequisites
+
+Ubuntu images may need `python3.12-venv` before the first `python3 -m venv .venv` (`sudo apt-get install -y python3.12-venv`). The update script assumes `.venv` already exists.
+
+### Lint / tests
+
+No project lint config or test suite. Sanity check: `python -m compileall -q runner src mcp_servers`.
+
+### Full trading cycles
+
+Require `CURSOR_API_KEY` in `.env` (or Configuration tab) plus Robinhood OAuth. MCP servers (`mcp_servers.trading`, `mcp_servers.status`) are spawned by the Cursor SDK during cycles — do not start them manually. Dashboard-only development works without those secrets.
