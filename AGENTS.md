@@ -13,3 +13,47 @@ Crypto 24/7; `market_hours_only` = US equities only. Uncertain → no action + r
 ## MCP
 - **robinhood-trading** — market data and orders
 - **robinhood-status** — `log_event` only
+
+## Cursor Cloud specific instructions
+
+Single-process Python monolith (FastAPI + Uvicorn). No npm, Docker, or separate test/lint suite in the repo.
+
+### First-time setup (once per VM image)
+
+Ubuntu/Debian VMs need `python3.12-venv` before `python3 -m venv .venv` works:
+
+```bash
+sudo apt-get install -y python3.12-venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env   # if .env missing; add CURSOR_API_KEY for agent cycles
+```
+
+### Start the dashboard
+
+```bash
+source .venv/bin/activate
+python -m runner.main
+```
+
+Also available as `robinhood-bot`. Default URL: http://127.0.0.1:8765/
+
+### Verify without external credentials
+
+The web UI and REST API work without `CURSOR_API_KEY` or Robinhood OAuth. Quick checks:
+
+```bash
+curl -s http://127.0.0.1:8765/api/bots
+curl -s http://127.0.0.1:8765/api/settings
+```
+
+Agent cycles (`run-once`, scheduler, **Run Cycle** button) require `CURSOR_API_KEY` and Robinhood connection via Configuration tab.
+
+### Syntax sanity check
+
+No pytest/ruff configured. Use `python -m compileall -q runner src mcp_servers` if needed.
+
+### Runtime data
+
+SQLite DB at `data/bot.db` (gitignored). MCP child processes (`mcp_servers/status`, `mcp_servers/trading`) are spawned automatically during agent cycles — do not start them manually.
