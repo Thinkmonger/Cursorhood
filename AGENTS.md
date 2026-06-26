@@ -13,3 +13,16 @@ Crypto 24/7; `market_hours_only` = US equities only. Uncertain → no action + r
 ## MCP
 - **robinhood-trading** — market data and orders
 - **robinhood-status** — `log_event` only
+
+## Cursor Cloud specific instructions
+
+This is a Python 3.11+ FastAPI web console (the "Robinhood Agentic Console"). There is no test suite or linter configured in the repo; "running the app" means starting the dashboard.
+
+- **Virtualenv**: dependencies install into `.venv` (gitignored). Activate with `. .venv/bin/activate` before running commands. The update script keeps `.venv` current.
+- **Run the dashboard**: `python -m runner.main` serves the web console at `http://127.0.0.1:8765/` (host/port from `config/app.yaml`/`.env`). Routes are documented in `README.md`.
+- **Manual single cycle**: `python -m runner.main run-once [--bot <id>]` — requires setup complete and a valid `CURSOR_API_KEY`; it will exit early otherwise.
+- **`.env`**: copy from `.env.example` if missing. The app runs fine without `CURSOR_API_KEY` (it just reports "Setup incomplete"); the key is only needed to actually execute agent trading cycles via the Cursor SDK.
+- **Core functionality without external keys**: creating bots, seeding/resetting the simulation ledger (default `$500` cash), portfolio/statistics views, and the dashboard UI all work with no Robinhood/Cursor/Massive credentials. Use these for smoke testing.
+- **State/DB**: a SQLite DB is created at `data/bot.db` on first run (the `data/` dir is gitignored). Delete it to reset all bots/runs.
+- **Harmless startup noise**: `python -m runner.main` may auto-open a browser (`open_browser_on_start`), producing `dbus`/`GCM`/`gpu` Chrome errors in the log. These are unrelated to the server, which is healthy once you see `Uvicorn running on http://127.0.0.1:8765`.
+- **`.cursor/mcp.json`** contains Windows paths and a sample token; it is only used when running real Robinhood MCP trading and is not needed to start the dashboard.
