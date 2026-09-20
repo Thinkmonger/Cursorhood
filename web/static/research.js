@@ -1,4 +1,5 @@
 let currentSymbol = "";
+const reportCharts = new Map();
 
 function labelize(key) {
   return String(key)
@@ -6,49 +7,275 @@ function labelize(key) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function toNumber(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const n = Number(String(value).replace(/[%$,]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatCompact(value) {
+  if (value == null || value === "") return t("common.emDash");
+  const n = toNumber(value);
+  if (n == null) return String(value);
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return String(Number(n.toFixed(4)));
+}
+
+function formatPct(value) {
+  const n = toNumber(value);
+  if (n == null) return t("common.emDash");
+  const pct = Math.abs(n) <= 1 && Math.abs(n) > 0 ? n * 100 : n;
+  return `${pct.toFixed(2)}%`;
+}
+
 function formatCell(value) {
   if (value == null || value === "") return t("common.emDash");
-  if (typeof value === "number") {
-    return Math.abs(value) >= 1000
-      ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
-      : String(Number(value.toFixed(4)));
-  }
+  if (typeof value === "number") return formatCompact(value);
   return String(value);
 }
 
-function renderKeyValues(target, obj) {
-  const el = document.getElementById(target);
-  if (!el) return;
-  const entries = Object.entries(obj || {});
-  if (!entries.length) {
-    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
-    return;
-  }
-  el.innerHTML = `<dl class="summary-dl mb-0">${entries
-    .map(
-      ([k, v]) =>
-        `<dt>${escapeHtml(labelize(k))}</dt><dd>${escapeHtml(formatCell(v))}</dd>`
-    )
-    .join("")}</dl>`;
+function destroyReportCharts() {
+  reportCharts.forEach((chart) => chart.destroy());
+  reportCharts.clear();
 }
 
-function renderRowTable(target, rows) {
+function chartOrEmpty(target, html) {
   const el = document.getElementById(target);
+  if (!el) return null;
+  el.innerHTML = html;
+  return el;
+}
+
+function emptyNote(target) {
+  chartOrEmpty(target, `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`);
+}
+
+function metricCard(label, value) {
+  return `<div class="col-6 col-md-4 col-xl-2">
+    <div class="metric-card">
+      <div class="metric-label">${escapeHtml(label)}</div>
+      <div class="metric-value">${escapeHtml(value)}</div>
+    </div>
+  </div>`;
+}
+
+function renderHero(symbol, fundamentals, book) {
+  const el = document.getElementById("report-hero");
   if (!el) return;
-  if (!rows || !rows.length) {
-    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
+  const chips = [fundamentals?.sector, fundamentals?.industry].filter(Boolean);
+  const last = book?.last ?? fundamentals?.open;
+  el.innerHTML = `
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <div class="fs-4 fw-semibold">${escapeHtml(symbol)}</div>
+      ${chips.map((c) => `<span class="chip">${escapeHtml(c)}</span>`).join("")}
+    </div>
+    <div class="row g-2">
+      ${metricCard(t("research.last"), formatCompact(last))}
+      ${metricCard(t("research.bid"), formatCompact(book?.bid))}
+      ${metricCard(t("research.ask"), formatCompact(book?.ask))}
+    </div>
+    ${fundamentals?.description ? `<p class="small text-secondary mt-3 mb-0">${escapeHtml(fundamentals.description)}</p>` : ""}
+  `;
+}
+
+function renderStats(fundamentals) {
+  const el = document.getElementById("report-stats");
+  if (!el) return;
+  if (!fundamentals || !Object.keys(fundamentals).length) {
+    el.innerHTML = "";
     return;
   }
-  const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
-  el.innerHTML = `<div class="table-responsive"><table class="table table-dark table-sm mb-0">
-    <thead><tr>${columns.map((c) => `<th>${escapeHtml(labelize(c))}</th>`).join("")}</tr></thead>
-    <tbody>${rows
-      .map(
-        (r) =>
-          `<tr>${columns.map((c) => `<td>${escapeHtml(formatCell(r[c]))}</td>`).join("")}</tr>`
-      )
-      .join("")}</tbody>
-  </table></div>`;
+  el.innerHTML = [
+    metricCard(t("research.marketCap"), formatCompact(fundamentals.market_cap)),
+    metricCard(t("research.peRatio"), formatCompact(fundamentals.pe_ratio)),
+    metricCard(t("research.pbRatio"), formatCompact(fundamentals.pb_ratio)),
+    metricCard(t("research.divYield"), formatPct(fundamentals.dividend_yield)),
+    metricCard(t("research.volume"), formatCompact(fundamentals.volume || fundamentals.average_volume)),
+  ].join("");
+}
+
+function renderRange(fundamentals, book) {
+  const el = document.getElementById("report-range");
+  if (!el) return;
+  const low = toNumber(fundamentals?.low_52_weeks);
+  const high = toNumber(fundamentals?.high_52_weeks);
+  const last = toNumber(book?.last ?? fundamentals?.open);
+  if (low == null || high == null || high <= low) {
+    el.innerHTML = "";
+    return;
+  }
+  const pct = last == null ? 0 : Math.min(100, Math.max(0, ((last - low) / (high - low)) * 100));
+  el.innerHTML = `
+    <div class="stat-label mb-2">${escapeHtml(t("research.week52"))}</div>
+    <div class="d-flex justify-content-between small text-secondary mb-1">
+      <span>${escapeHtml(formatCompact(low))}</span>
+      <span>${escapeHtml(formatCompact(high))}</span>
+    </div>
+    <div class="range-track">
+      <div class="range-fill" style="width:${pct}%"></div>
+      <div class="range-marker" style="left:${pct}%"></div>
+    </div>
+  `;
+}
+
+function makeBarChart(canvasId, labels, datasets) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === "undefined") return;
+  if (reportCharts.has(canvasId)) reportCharts.get(canvasId).destroy();
+  const chart = new Chart(canvas, {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      plugins: { legend: { labels: { color: "#adb5bd", boxWidth: 10 } } },
+      scales: {
+        x: { ticks: { color: "#8b9cb3" }, grid: { color: "rgba(255,255,255,0.06)" } },
+        y: { ticks: { color: "#8b9cb3" }, grid: { color: "rgba(255,255,255,0.06)" } },
+      },
+      maintainAspectRatio: false,
+    },
+  });
+  reportCharts.set(canvasId, chart);
+}
+
+function periodLabel(row, index) {
+  return (
+    row.period ||
+    row.fiscal_period ||
+    (row.year && row.quarter ? `${row.year} Q${row.quarter}` : "") ||
+    (row.fiscal_year && row.fiscal_quarter ? `${row.fiscal_year} Q${row.fiscal_quarter}` : "") ||
+    row.report_date ||
+    row.period_end_date ||
+    row.date ||
+    `#${index + 1}`
+  );
+}
+
+function renderEarnings(rows) {
+  if (!rows || !rows.length) {
+    emptyNote("report-earnings");
+    return;
+  }
+  chartOrEmpty(
+    "report-earnings",
+    `<div class="research-chart"><canvas id="earnings-chart"></canvas></div>`
+  );
+  makeBarChart(
+    "earnings-chart",
+    rows.map(periodLabel),
+    [
+      {
+        label: "EPS actual",
+        data: rows.map((r) => toNumber(r.eps_actual)),
+        backgroundColor: "#00c805",
+      },
+      {
+        label: "EPS estimate",
+        data: rows.map((r) => toNumber(r.eps_estimate)),
+        backgroundColor: "#6c757d",
+      },
+    ]
+  );
+}
+
+function renderFinancials(rows) {
+  if (!rows || !rows.length) {
+    emptyNote("report-financials");
+    return;
+  }
+  chartOrEmpty(
+    "report-financials",
+    `<div class="research-chart"><canvas id="financials-chart"></canvas></div>`
+  );
+  makeBarChart(
+    "financials-chart",
+    rows.map(periodLabel),
+    [
+      {
+        label: "Revenue",
+        data: rows.map((r) => toNumber(r.revenue)),
+        backgroundColor: "#0dcaf0",
+      },
+      {
+        label: "Net income",
+        data: rows.map((r) => toNumber(r.net_income ?? r.gross_profit)),
+        backgroundColor: "#00c805",
+      },
+    ]
+  );
+}
+
+function renderRatings(ratings) {
+  const el = document.getElementById("report-ratings");
+  if (!el) return;
+  if (!ratings || !Object.keys(ratings).length) {
+    emptyNote("report-ratings");
+    return;
+  }
+  const buy = toNumber(ratings.num_buy_ratings) || 0;
+  const hold = toNumber(ratings.num_hold_ratings) || 0;
+  const sell = toNumber(ratings.num_sell_ratings) || 0;
+  const hasCounts = buy + hold + sell > 0;
+  el.innerHTML = `
+    <div class="row g-2">
+      ${hasCounts ? `<div class="col-md-6"><div class="research-chart"><canvas id="ratings-chart"></canvas></div></div>` : ""}
+      <div class="${hasCounts ? "col-md-6" : "col-12"}">
+        <div class="row g-2">
+          ${metricCard(t("research.highTarget"), formatCompact(ratings.high_price_target))}
+          ${metricCard(t("research.meanTarget"), formatCompact(ratings.mean_price_target || ratings.target_price))}
+          ${metricCard(t("research.lowTarget"), formatCompact(ratings.low_price_target))}
+        </div>
+        ${ratings.summary ? `<p class="small text-secondary mt-2 mb-0">${escapeHtml(ratings.summary)}</p>` : ""}
+      </div>
+    </div>
+  `;
+  if (hasCounts && typeof Chart !== "undefined") {
+    const canvas = document.getElementById("ratings-chart");
+    if (canvas) {
+      if (reportCharts.has("ratings-chart")) reportCharts.get("ratings-chart").destroy();
+      reportCharts.set(
+        "ratings-chart",
+        new Chart(canvas, {
+          type: "doughnut",
+          data: {
+            labels: [t("research.buy"), t("research.hold"), t("research.sell")],
+            datasets: [{ data: [buy, hold, sell], backgroundColor: ["#00c805", "#ffc107", "#ff5000"] }],
+          },
+          options: {
+            plugins: { legend: { position: "bottom", labels: { color: "#adb5bd", boxWidth: 10 } } },
+            maintainAspectRatio: false,
+          },
+        })
+      );
+    }
+  }
+}
+
+function renderIndicators(indicators) {
+  const el = document.getElementById("report-indicators");
+  if (!el) return;
+  if (!indicators || !Object.keys(indicators).length) {
+    emptyNote("report-indicators");
+    return;
+  }
+  const cards = [];
+  const rsi = indicators.rsi ?? indicators.rsi_14;
+  if (rsi != null) cards.push(metricCard(t("research.rsi"), formatCompact(rsi)));
+  const macd = indicators.macd ?? indicators.macd_line;
+  if (macd != null) cards.push(metricCard(t("research.macd"), formatCompact(macd)));
+  const sma = indicators.sma_20 ?? indicators.sma ?? indicators.sma_50;
+  if (sma != null) cards.push(metricCard(t("research.sma"), formatCompact(sma)));
+  const extras = Object.entries(indicators).filter(
+    ([k]) => !["rsi", "rsi_14", "macd", "macd_line", "sma_20", "sma", "sma_50"].includes(k)
+  );
+  extras.slice(0, 6).forEach(([k, v]) => cards.push(metricCard(labelize(k), formatCompact(v))));
+  el.innerHTML = cards.length
+    ? `<div class="row g-2">${cards.join("")}</div>`
+    : `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
 }
 
 function renderNews(target, rows) {
@@ -64,13 +291,29 @@ function renderNews(target, rows) {
       const heading = n.url
         ? `<a href="${escapeHtml(n.url)}" target="_blank" rel="noopener">${title}</a>`
         : title;
-      return `<div class="py-2 border-bottom border-secondary-subtle">
+      return `<div class="metric-card mb-2">
         <div class="small fw-semibold">${heading}</div>
         <div class="text-secondary small">${escapeHtml([n.source, n.published_at].filter(Boolean).join(" · "))}</div>
         ${n.summary ? `<div class="small mt-1">${escapeHtml(n.summary)}</div>` : ""}
       </div>`;
     })
     .join("");
+}
+
+function watchlistHref(row) {
+  const id = row.id || row.name || "";
+  return `/research/watchlists/${encodeURIComponent(id)}`;
+}
+
+function watchlistCard(row) {
+  const count = row.item_count ?? (row.symbols || []).length;
+  const countLabel = count ? t("research.symbolsCount", { count }) : "";
+  return `<div class="col-sm-6">
+    <a class="watchlist-link-card" href="${escapeHtml(watchlistHref(row))}">
+      <div class="fw-semibold small">${escapeHtml(row.icon_emoji ? `${row.icon_emoji} ` : "")}${escapeHtml(row.name || row.id || "")}</div>
+      <div class="text-secondary small">${escapeHtml(countLabel)}</div>
+    </a>
+  </div>`;
 }
 
 async function runSearch() {
@@ -100,20 +343,29 @@ async function runReport() {
 
 async function loadReport(symbol) {
   currentSymbol = symbol;
+  const params = new URLSearchParams(location.search);
+  if (params.get("symbol") !== symbol) {
+    params.set("symbol", symbol);
+    history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+  }
+  const input = document.getElementById("research-query");
+  if (input && !input.value) input.value = symbol;
   document.getElementById("report-card")?.classList.remove("d-none");
   document.getElementById("report-symbol").textContent = symbol;
   const status = document.getElementById("report-status");
   if (status) status.textContent = t("common.loading");
+  destroyReportCharts();
 
   try {
     const report = await api(`/api/research/${encodeURIComponent(symbol)}`);
     if (!report.ok) throw new Error(report.error || t("research.reportFailed"));
-    renderKeyValues("report-fundamentals", report.fundamentals);
-    renderKeyValues("report-indicators", report.indicators);
-    renderKeyValues("report-price-book", report.price_book);
-    renderKeyValues("report-ratings", report.analyst_ratings);
-    renderRowTable("report-earnings", report.earnings);
-    renderRowTable("report-financials", report.financials);
+    renderHero(symbol, report.fundamentals, report.price_book);
+    renderStats(report.fundamentals);
+    renderRange(report.fundamentals, report.price_book);
+    renderEarnings(report.earnings);
+    renderFinancials(report.financials);
+    renderRatings(report.analyst_ratings);
+    renderIndicators(report.indicators);
     renderNews("report-news", report.news);
     if (status) status.textContent = "";
   } catch (err) {
@@ -180,32 +432,27 @@ async function loadWatchlists() {
   const el = document.getElementById("research-watchlists");
   if (!el) return;
   try {
-    const [mine, popular] = await Promise.all([
-      api("/api/watchlists").catch(() => ({ watchlists: [] })),
-      api("/api/watchlists/popular").catch(() => ({ watchlists: [] })),
-    ]);
+    const catalog = await api("/api/watchlists/catalog").catch(async () => {
+      const [mine, popular] = await Promise.all([
+        api("/api/watchlists").catch(() => ({ watchlists: [] })),
+        api("/api/watchlists/popular").catch(() => ({ watchlists: [] })),
+      ]);
+      return { yours: mine.watchlists || [], robinhood: popular.watchlists || [] };
+    });
     const sections = [
-      [t("research.myWatchlists"), mine.watchlists || []],
-      [t("research.popularWatchlists"), popular.watchlists || []],
+      [t("research.myWatchlists"), t("research.yoursHint"), catalog.yours || []],
+      [t("research.popularWatchlists"), t("research.robinhoodHint"), catalog.robinhood || []],
     ];
     el.innerHTML = sections
-      .map(([heading, rows]) => {
+      .map(([heading, hint, rows]) => {
         const body = rows.length
-          ? rows
-              .map(
-                (w) => `<div class="py-1 border-bottom border-secondary-subtle">
-                  <div class="small fw-semibold">${escapeHtml(w.name || w.id || "")}</div>
-                  <div class="small">${(w.symbols || [])
-                    .map(
-                      (s) =>
-                        `<button type="button" class="btn btn-link btn-sm p-0 me-2" onclick="loadReport('${escapeHtml(s)}')">${escapeHtml(s)}</button>`
-                    )
-                    .join("")}</div>
-                </div>`
-              )
-              .join("")
+          ? `<div class="row g-2">${rows.map(watchlistCard).join("")}</div>`
           : `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
-        return `<div class="mb-3"><div class="stat-label mb-1">${escapeHtml(heading)}</div>${body}</div>`;
+        return `<div class="mb-4">
+          <div class="stat-label mb-1">${escapeHtml(heading)}</div>
+          <p class="text-secondary small mb-2">${escapeHtml(hint)}</p>
+          ${body}
+        </div>`;
       })
       .join("");
   } catch (err) {
@@ -219,4 +466,6 @@ document.addEventListener("i18n:ready", () => {
   document.getElementById("research-query")?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") runReport();
   });
+  const preset = new URLSearchParams(location.search).get("symbol");
+  if (preset) loadReport(preset.toUpperCase());
 });

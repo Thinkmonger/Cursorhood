@@ -64,10 +64,16 @@ def compact_scans(payload: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     source = payload
     if isinstance(source, dict):
-        for key in ("scans", "results", "data"):
-            if isinstance(source.get(key), list):
-                source = source[key]
-                break
+        inner = source.get("data")
+        if isinstance(inner, dict):
+            source = inner
+        elif isinstance(inner, list):
+            source = inner
+        if isinstance(source, dict):
+            for key in ("scans", "results", "data"):
+                if isinstance(source.get(key), list):
+                    source = source[key]
+                    break
     if not isinstance(source, list):
         return rows
     for item in source:
@@ -75,7 +81,7 @@ def compact_scans(payload: Any) -> list[dict[str, Any]]:
             continue
         row = {
             "id": str(item.get("id") or item.get("scan_id") or ""),
-            "name": str(item.get("name") or item.get("display_name") or ""),
+            "name": str(item.get("name") or item.get("display_name") or item.get("title") or ""),
         }
         filters = item.get("filters")
         if isinstance(filters, list):

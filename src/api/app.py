@@ -115,6 +115,10 @@ def create_app() -> FastAPI:
     async def research_page():
         return _html_page("research.html")
 
+    @app.get("/research/watchlists/{watchlist_id}")
+    async def watchlist_overview_page(watchlist_id: str):
+        return _html_page("watchlist.html")
+
     @app.get("/setup")
     async def setup_redirect():
         return RedirectResponse("/?tab=config", status_code=302)

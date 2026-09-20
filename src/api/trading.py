@@ -154,6 +154,24 @@ async def popular_watchlists() -> dict[str, Any]:
     return {"ok": True, "watchlists": compact_watchlist_list(await get_popular_watchlists())}
 
 
+@watchlists_router.get("/catalog")
+async def watchlist_catalog() -> dict[str, Any]:
+    from src.trading.watchlists import compact_watchlist_list, get_popular_watchlists, get_watchlists, partition_watchlists
+
+    parts = partition_watchlists(
+        compact_watchlist_list(await get_watchlists()),
+        compact_watchlist_list(await get_popular_watchlists()),
+    )
+    return {"ok": True, **parts}
+
+
+@watchlists_router.get("/{watchlist}/overview")
+async def watchlist_overview(watchlist: str) -> dict[str, Any]:
+    from src.trading.watchlists import watchlist_overview as build_overview
+
+    return await build_overview(watchlist)
+
+
 @watchlists_router.get("/{watchlist}/items")
 async def watchlist_items(watchlist: str) -> dict[str, Any]:
     from src.trading.mcp_tools import extract_symbols

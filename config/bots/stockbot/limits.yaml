@@ -5,9 +5,9 @@ max_open_positions: 5
 market_hours_only: false
 min_seconds_between_orders: 60
 symbol_source: popular_watchlist
-symbol_source_ref: Tradable crypto
+symbol_source_ref: Trending stocks
 symbol_source_limit: 20
-asset_class: crypto
+asset_class: equity
 options_enabled: false
 max_option_contracts: 1
 max_option_notional_usd: 100.0
@@ -17,6 +17,6 @@ allowed_option_types:
 - call
 - put
 allow_option_selling: false
-crypto_enabled: true
+crypto_enabled: false
 allowed_crypto_pairs: []
 max_crypto_notional_usd: 250.0

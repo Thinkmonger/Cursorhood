@@ -220,8 +220,8 @@ class MCPClient:
                     snapshot["quotes"] = crypto_quotes_envelope(crypto_quotes)
                 from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars
 
-                snapshot["historical_bars_1h"] = await fetch_hourly_bars(symbols, skip_robinhood=True)
-                snapshot["historical_bars_1d"] = await fetch_daily_bars(symbols, skip_robinhood=True)
+                snapshot["historical_bars_1h"] = await fetch_hourly_bars(symbols, skip_massive=True)
+                snapshot["historical_bars_1d"] = await fetch_daily_bars(symbols, skip_massive=True)
             positions = await get_crypto_positions(account_number)
             rows = compact_crypto_positions(positions)
             if rows:

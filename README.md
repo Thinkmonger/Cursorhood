@@ -56,6 +56,7 @@ Open **http://127.0.0.1:8765/** in your browser. Stop the server with **Ctrl+C**
 | `/bots/{id}` | Bot console — portfolio, scheduler, risk, paper trading |
 | `/bots/{id}/agents` | Run history and live activity |
 | `/research` | Symbol search, reports, scanners, watchlists |
+| `/research/watchlists/{id}` | Watchlist overview — every symbol and fundamentals |
 | `/statistics` | Aggregate and per-bot metrics |
 
 Legacy paths (`/setup`, `/settings`, `/agents`) redirect to the routes above.

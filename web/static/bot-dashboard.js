@@ -50,6 +50,7 @@ function toggleAssetClassFields() {
 function toggleSymbolSourceFields() {
   const source = document.getElementById("symbol-source")?.value || "static";
   document.getElementById("symbol-source-ref-block")?.classList.toggle("d-none", source === "static");
+  loadWatchlistOptions();
 }
 
 function parseOptionalInt(value) {
@@ -817,13 +818,21 @@ async function loadWatchlistOptions() {
   const datalist = document.getElementById("watchlist-options");
   if (!datalist) return;
   try {
-    const [{ watchlists }, popular] = await Promise.all([
+    const [{ watchlists }, popular, scansRes] = await Promise.all([
       api("/api/watchlists"),
       api("/api/watchlists/popular").catch(() => ({ watchlists: [] })),
+      api("/api/scans").catch(() => ({ scans: [] })),
     ]);
+    const source = document.getElementById("symbol-source")?.value || "static";
+    const rows =
+      source === "scan"
+        ? scansRes.scans || []
+        : source === "popular_watchlist"
+          ? popular.watchlists || []
+          : watchlists || [];
     const names = new Set();
     const options = [];
-    for (const w of [...(watchlists || []), ...(popular.watchlists || [])]) {
+    for (const w of rows) {
       const name = w.name || w.id || "";
       if (!name || names.has(name)) continue;
       names.add(name);

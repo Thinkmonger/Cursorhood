@@ -118,8 +118,7 @@ def _list_rows(payload: Any, *keys: str) -> list[dict[str, Any]]:
     return []
 
 
-def compact_fundamentals(payload: Any) -> dict[str, Any]:
-    row = _first_row(payload)
+def _compact_fundamentals_row(row: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key in _FUNDAMENTAL_KEYS:
         value = row.get(key)
@@ -129,6 +128,31 @@ def compact_fundamentals(payload: Any) -> dict[str, Any]:
             out[key] = str(value)[:400]
         else:
             out[key] = value
+    return out
+
+
+def compact_fundamentals(payload: Any) -> dict[str, Any]:
+    return _compact_fundamentals_row(_first_row(payload))
+
+
+def compact_fundamentals_by_symbol(payload: Any) -> dict[str, dict[str, Any]]:
+    """Map ticker → compacted fundamentals from a multi-symbol payload."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in _list_rows(payload, "fundamentals", "results"):
+        inner = row.get("fundamentals")
+        source = inner if isinstance(inner, dict) else row
+        symbol = str(
+            source.get("symbol")
+            or source.get("ticker")
+            or row.get("symbol")
+            or row.get("ticker")
+            or ""
+        ).strip().upper()
+        if not symbol:
+            continue
+        compacted = _compact_fundamentals_row(source)
+        if compacted:
+            out[symbol] = compacted
     return out
 
 
