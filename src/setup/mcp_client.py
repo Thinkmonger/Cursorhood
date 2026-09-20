@@ -136,71 +136,120 @@ class MCPClient:
             return snapshot
         accounts_data = extract_mcp_data(result)
         account_number = agentic_account_number(accounts_data)
-        for tool, key, args in (
-            ("get_portfolio", "portfolio", {"account_number": account_number} if account_number else None),
-            ("get_equity_positions", "positions", {"account_number": account_number} if account_number else None),
-        ):
-            if args is None:
-                snapshot[key] = {"error": "No agentic account_number from get_accounts"}
-                continue
-            result = await self.call_tool(tool, args)
+        portfolio_args = {"account_number": account_number} if account_number else None
+        if portfolio_args is None:
+            snapshot["portfolio"] = {"error": "No agentic account_number from get_accounts"}
+        else:
+            result = await self.call_tool("get_portfolio", portfolio_args)
             if not result.get("ok"):
                 snapshot["ok"] = False
-                snapshot["error"] = result.get("error", f"{tool} failed")
+                snapshot["error"] = result.get("error", "get_portfolio failed")
                 return snapshot
-            parsed = extract_mcp_data(result)
-            snapshot[key] = _compact_mcp_result(parsed)
+            snapshot["portfolio"] = _compact_mcp_result(extract_mcp_data(result))
+
         symbols: list[str] = []
         limits: Any = None
+        asset_class = "equity"
         try:
             from src.settings.service import SettingsService
 
             limits = SettingsService(bot_id).read_limits()
+            asset_class = str(getattr(limits, "asset_class", None) or "equity").strip().lower()
+            if asset_class not in ("equity", "option", "crypto"):
+                asset_class = "crypto" if limits.crypto_enabled else "option" if limits.options_enabled else "equity"
+            static = (
+                list(limits.allowed_crypto_pairs or [])
+                if asset_class == "crypto"
+                else list(limits.allowed_symbols or [])
+            )
             symbols, origin = await resolve_symbols(
                 source=limits.symbol_source,
                 ref=limits.symbol_source_ref,
-                static_symbols=list(limits.allowed_symbols or []),
+                static_symbols=static,
                 limit=limits.symbol_source_limit,
+                asset_class=asset_class,
             )
             snapshot["symbol_source"] = {"source": origin, "symbols": list(symbols)}
         except Exception:
             pass
+
+        if asset_class != "crypto" and account_number:
+            result = await self.call_tool(
+                "get_equity_positions",
+                {"account_number": account_number},
+            )
+            if not result.get("ok"):
+                snapshot["ok"] = False
+                snapshot["error"] = result.get("error", "get_equity_positions failed")
+                return snapshot
+            snapshot["positions"] = _compact_mcp_result(extract_mcp_data(result))
+
         try:
             from src.simulation.ledger import get_ledger, is_simulation_mode
 
             if is_simulation_mode(bot_id):
                 ledger = get_ledger(bot_id)
                 for position in (ledger.get("positions") or {}).values():
-                    # v2 keys look like "equity:AAPL"; quotes need the bare ticker,
-                    # and only equities belong in the equity quote/bar lookups.
                     if not isinstance(position, dict) or not position.get("symbol"):
                         continue
-                    if position.get("asset_class", "equity") == "equity":
-                        symbols.append(str(position["symbol"]))
+                    if str(position.get("asset_class") or "equity") != asset_class:
+                        continue
+                    symbols.append(str(position["symbol"]))
         except Exception:
             pass
-        symbols = sorted({str(s).upper() for s in symbols if s})
-        if symbols:
-            quotes = await self.call_tool(
-                "get_equity_quotes",
-                {"symbols": symbols},
-            )
-            if quotes.get("ok"):
-                snapshot["quotes"] = _compact_mcp_result(extract_mcp_data(quotes))
-            from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars
+        if asset_class == "crypto":
+            from src.trading.crypto import normalize_pair
 
-            snapshot["historical_bars_1h"] = await fetch_hourly_bars(symbols)
-            snapshot["historical_bars_1d"] = await fetch_daily_bars(symbols)
+            symbols = sorted({normalize_pair(s) for s in symbols if s})
+        else:
+            symbols = sorted({str(s).upper() for s in symbols if s})
 
         broker_orders_payload: Any = None
-        account_number = agentic_account_number(accounts_data)
-        if account_number:
-            orders_result = await self.call_tool(
-                "get_equity_orders",
-                {"account_number": account_number},
+        if asset_class == "crypto":
+            from src.trading.crypto import (
+                compact_crypto_positions,
+                crypto_quotes_envelope,
+                get_crypto_orders,
+                get_crypto_positions,
+                get_crypto_quotes,
             )
-            if orders_result.get("ok"):
-                broker_orders_payload = extract_mcp_data(orders_result)
+
+            if symbols:
+                crypto_quotes = await get_crypto_quotes(symbols)
+                if crypto_quotes is not None:
+                    snapshot["quotes"] = crypto_quotes_envelope(crypto_quotes)
+                from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars
+
+                snapshot["historical_bars_1h"] = await fetch_hourly_bars(symbols, skip_robinhood=True)
+                snapshot["historical_bars_1d"] = await fetch_daily_bars(symbols, skip_robinhood=True)
+            positions = await get_crypto_positions(account_number)
+            rows = compact_crypto_positions(positions)
+            if rows:
+                snapshot["crypto_positions"] = rows
+            if account_number:
+                broker_orders_payload = await get_crypto_orders(account_number)
+        else:
+            if symbols:
+                quotes = await self.call_tool("get_equity_quotes", {"symbols": symbols})
+                if quotes.get("ok"):
+                    snapshot["quotes"] = _compact_mcp_result(extract_mcp_data(quotes))
+                from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars
+
+                snapshot["historical_bars_1h"] = await fetch_hourly_bars(symbols)
+                snapshot["historical_bars_1d"] = await fetch_daily_bars(symbols)
+            if account_number:
+                orders_result = await self.call_tool(
+                    "get_equity_orders",
+                    {"account_number": account_number},
+                )
+                if orders_result.get("ok"):
+                    broker_orders_payload = extract_mcp_data(orders_result)
+            if asset_class == "option":
+                from src.trading.options import compact_option_positions, get_option_positions
+
+                rows = compact_option_positions(await get_option_positions(account_number))
+                if rows:
+                    snapshot["option_positions"] = rows
 
         snapshot["trade_history"] = build_trade_history(bot_id, broker_orders_payload)
 
@@ -209,23 +258,8 @@ class MCPClient:
             watchlists_data = extract_mcp_data(watchlists_result)
             snapshot["watchlists"] = _compact_mcp_result(watchlists_data)
 
-        if limits is not None and getattr(limits, "options_enabled", False):
-            from src.trading.options import compact_option_positions, get_option_positions
-
-            positions = await get_option_positions(account_number)
-            rows = compact_option_positions(positions)
-            if rows:
-                snapshot["option_positions"] = rows
-
-        if limits is not None and getattr(limits, "crypto_enabled", False):
-            from src.trading.crypto import compact_crypto_positions, get_crypto_positions
-
-            positions = await get_crypto_positions(account_number)
-            rows = compact_crypto_positions(positions)
-            if rows:
-                snapshot["crypto_positions"] = rows
-
-        await self._add_research_context(bot_id, snapshot, symbols)
+        if asset_class != "crypto":
+            await self._add_research_context(bot_id, snapshot, symbols)
         return snapshot
 
     async def _add_research_context(

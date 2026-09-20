@@ -25,7 +25,9 @@ def _json_compact(obj: Any) -> str:
 
 
 def _essential_limits(limits: Any, resolved_symbols: list[str] | None = None) -> dict[str, Any]:
+    asset_class = str(getattr(limits, "asset_class", None) or "equity")
     out: dict[str, Any] = {
+        "asset_class": asset_class,
         "allowed_symbols": resolved_symbols or limits.allowed_symbols,
         "max_open_positions": limits.max_open_positions,
         "max_order_notional_usd": limits.max_order_notional_usd,
@@ -33,7 +35,7 @@ def _essential_limits(limits: Any, resolved_symbols: list[str] | None = None) ->
         "market_hours_only": limits.market_hours_only,
         "min_seconds_between_orders": limits.min_seconds_between_orders,
     }
-    if limits.options_enabled:
+    if asset_class == "option":
         out["options"] = {
             "max_contracts": limits.max_option_contracts,
             "max_notional_usd": limits.max_option_notional_usd,
@@ -41,11 +43,11 @@ def _essential_limits(limits: Any, resolved_symbols: list[str] | None = None) ->
             "allowed_types": limits.allowed_option_types,
             "allow_selling": limits.allow_option_selling,
         }
-    if limits.crypto_enabled:
+    if asset_class == "crypto":
         out["crypto"] = {
             "allowed_pairs": limits.allowed_crypto_pairs,
             "max_notional_usd": limits.max_crypto_notional_usd,
-            "note": "Crypto trades 24/7 and is exempt from market_hours_only.",
+            "note": "Crypto trades 24/7 and is exempt from market_hours_only. Empty allowed_pairs means the symbol source is the universe.",
         }
     return out
 
@@ -347,9 +349,12 @@ def build_cycle_prompt(
     if gate.get("active"):
         parts.append("BLOCK: investor profile incomplete — no orders; log_event none.")
 
+    review = {
+        "option": "review_option_order",
+        "crypto": "preview_crypto_order",
+    }.get(str(getattr(limits, "asset_class", "")), "review_equity_order")
     parts.append(
-        "Apply strategy to Context. Review before placing "
-        "(review_equity_order / review_option_order / preview_crypto_order). "
+        f"Apply strategy to Context. Review before placing ({review}). "
         "log_event once. Reply ≤2 sentences."
     )
 

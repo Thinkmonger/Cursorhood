@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 
@@ -34,6 +34,9 @@ class LimitsConfig(BaseModel):
 
     symbol_source_limit: int = Field(default=20, ge=1, le=100)
 
+    asset_class: Literal["equity", "option", "crypto"] = "equity"
+    """Exclusive class this bot may trade. Options and crypto flags stay in sync."""
+
     options_enabled: bool = False
 
     max_option_contracts: int = Field(default=1, ge=1, le=1000)
@@ -54,7 +57,28 @@ class LimitsConfig(BaseModel):
 
     max_crypto_notional_usd: float = Field(default=25.0, gt=0, le=100_000)
 
+    @model_validator(mode="before")
+    @classmethod
+    def infer_asset_class(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        raw = str(data.get("asset_class") or "").strip().lower()
+        if raw in ("equity", "option", "crypto"):
+            data["asset_class"] = raw
+            return data
+        if data.get("crypto_enabled"):
+            data["asset_class"] = "crypto"
+        elif data.get("options_enabled"):
+            data["asset_class"] = "option"
+        else:
+            data["asset_class"] = "equity"
+        return data
 
+    @model_validator(mode="after")
+    def sync_exclusive_asset_flags(self) -> "LimitsConfig":
+        self.crypto_enabled = self.asset_class == "crypto"
+        self.options_enabled = self.asset_class == "option"
+        return self
 
     @field_validator("allowed_symbols", "allowed_crypto_pairs", mode="before")
 

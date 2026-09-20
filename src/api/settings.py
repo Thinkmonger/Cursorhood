@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 
 
-from src.cursor_models import DEFAULT_API_MODEL, fetch_account_models
+from src.cursor_models import fetch_account_models
 from src.settings.service import SettingsService
 
 from src.setup.oauth import OAuthFlow
@@ -58,15 +58,7 @@ async def get_settings() -> dict[str, Any]:
 
 @router.get("/cursor/models")
 async def list_cursor_models() -> dict[str, Any]:
-    api_key = settings.get_cursor_api_key()
-    if not api_key:
-        return {
-            "ok": False,
-            "error": "No Cursor API key configured",
-            "default": DEFAULT_API_MODEL,
-            "models": [],
-        }
-    return await fetch_account_models(api_key)
+    return await fetch_account_models(settings.get_cursor_api_key())
 
 
 @router.put("/connections")

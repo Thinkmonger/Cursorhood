@@ -124,10 +124,10 @@ TOOL_CATEGORIES: dict[str, frozenset[str]] = {
     "alert": ALERT_TOOLS,
 }
 
-# Categories always exposed to the agent regardless of enabled asset classes.
-CORE_CATEGORIES: frozenset[str] = frozenset(
-    {"account", "watchlist", "market_data", "equity", "alert"}
-)
+# Categories shared by every bot. Asset-class tools are added per bot so a
+# crypto bot never sees equity/option order schemas, and vice versa.
+SHARED_CATEGORIES: frozenset[str] = frozenset({"account", "watchlist", "alert"})
+CORE_CATEGORIES: frozenset[str] = SHARED_CATEGORIES | frozenset({"market_data", "equity"})
 
 BASELINE_TRADING_TOOLS: frozenset[str] = frozenset().union(*TOOL_CATEGORIES.values())
 
@@ -275,15 +275,30 @@ def is_cancel_order_tool(name: str | None) -> bool:
     return "cancel_" in lower and "order" in lower
 
 
-def enabled_categories(*, options: bool = False, crypto: bool = False, scanners: bool = True) -> set[str]:
-    """Tool categories a bot should see, given its enabled asset classes."""
-    categories = set(CORE_CATEGORIES)
-    if options:
-        categories.add("option")
-    if crypto:
-        categories.add("crypto")
+def enabled_categories(
+    *,
+    options: bool = False,
+    crypto: bool = False,
+    scanners: bool = True,
+    asset_class: str | None = None,
+) -> set[str]:
+    """Tool categories a bot should see. One asset class only."""
+    if asset_class not in ("equity", "option", "crypto"):
+        if crypto:
+            asset_class = "crypto"
+        elif options:
+            asset_class = "option"
+        else:
+            asset_class = "equity"
+    categories = set(SHARED_CATEGORIES)
     if scanners:
         categories.add("scanner")
+    if asset_class == "crypto":
+        categories.add("crypto")
+    elif asset_class == "option":
+        categories.update({"option", "equity", "market_data"})
+    else:
+        categories.update({"equity", "market_data"})
     return categories
 
 
@@ -334,9 +349,16 @@ def compact_watchlists_for_prompt(payload: Any) -> list[dict[str, Any]] | None:
     return out or None
 
 
-def extract_symbols(raw: Any, limit: int | None = None) -> list[str]:
+def extract_symbols(
+    raw: Any,
+    limit: int | None = None,
+    *,
+    object_types: set[str] | frozenset[str] | None = None,
+) -> list[str]:
     """Pull ticker symbols out of the varied shapes Robinhood returns."""
     out: list[str] = []
+    if isinstance(raw, dict) and isinstance(raw.get("data"), (dict, list)):
+        raw = raw["data"]
     if isinstance(raw, dict):
         for key in ("symbols", "items", "results", "instruments"):
             if isinstance(raw.get(key), list):
@@ -346,17 +368,28 @@ def extract_symbols(raw: Any, limit: int | None = None) -> list[str]:
             raw = []
     if not isinstance(raw, list):
         return out
+    wanted = {str(t).lower() for t in object_types} if object_types else None
     for entry in raw:
         symbol: str | None = None
         if isinstance(entry, str):
             symbol = entry
         elif isinstance(entry, dict):
+            otype = str(
+                entry.get("object_type") or entry.get("objectType") or entry.get("type") or ""
+            ).lower()
+            if wanted and otype and otype not in wanted:
+                continue
             value = (
                 entry.get("symbol")
                 or entry.get("ticker")
                 or entry.get("instrument_symbol")
                 or entry.get("display_symbol")
+                or entry.get("pair")
+                or entry.get("currency_pair")
+                or entry.get("code")
             )
+            if not value and isinstance(entry.get("currency"), dict):
+                value = entry["currency"].get("code") or entry["currency"].get("symbol")
             if value:
                 symbol = str(value)
         if not symbol:

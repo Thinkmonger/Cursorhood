@@ -196,9 +196,13 @@ def apply_simulation_snapshot_policy(bot_id: str, snapshot: dict[str, Any]) -> d
     option_rows = _positions_for_class(ledger, pos.OPTION, quotes)
     if option_rows:
         out["option_positions"] = option_rows
+    else:
+        out.pop("option_positions", None)
     crypto_rows = _positions_for_class(ledger, pos.CRYPTO, quotes)
     if crypto_rows:
         out["crypto_positions"] = crypto_rows
+    else:
+        out.pop("crypto_positions", None)
     if snapshot.get("trade_history"):
         out["trade_history"] = _filter_trade_history_for_simulation(snapshot["trade_history"])
     return out

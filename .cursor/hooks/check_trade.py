@@ -178,6 +178,17 @@ def option_meta(args: dict) -> dict:
     }
 
 
+def configured_asset_class(limits: dict) -> str:
+    raw = str(limits.get("asset_class") or "").strip().lower()
+    if raw in ("equity", "option", "crypto"):
+        return raw
+    if limits.get("crypto_enabled"):
+        return "crypto"
+    if limits.get("options_enabled"):
+        return "option"
+    return "equity"
+
+
 def check_equity(args: dict, limits: dict) -> None:
     if limits.get("market_hours_only") and not is_market_hours():
         deny("Market hours only — trading blocked outside 9:30–16:00 ET weekdays.")
@@ -296,6 +307,10 @@ def main() -> None:
     asset_class = asset_class_for_tool(tool_name)
     app = load_bot_app()
     limits = load_limits()
+    bot_class = configured_asset_class(limits)
+
+    if asset_class != bot_class:
+        deny(f"This bot trades {bot_class} only; {tool_name} is a {asset_class} order.")
 
     if app.get("simulation_mode"):
         simulate_order(tool_name, args, asset_class, limits)

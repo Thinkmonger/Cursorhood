@@ -91,11 +91,13 @@ def _bot_categories(bot_id: str) -> set[str]:
         settings = SettingsService(bot_id)
         limits = settings.read_limits()
         app = settings.read_bot_app()
-        return enabled_categories(
+        cats = enabled_categories(
             options=limits.options_enabled,
             crypto=limits.crypto_enabled,
             scanners=app.scanners_enabled,
+            asset_class=getattr(limits, "asset_class", None),
         )
+        return cats
     except Exception:
         return set(CORE_CATEGORIES)
 

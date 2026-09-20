@@ -284,9 +284,9 @@ def _last_cycle_assets(store: Store, bot_id: str, limits: Any) -> dict[str, Any]
         if snapshot:
             break
 
-    if limits.options_enabled:
+    if getattr(limits, "asset_class", None) == "option" or limits.options_enabled:
         out["option_positions"] = snapshot.get("option_positions") or []
-    if limits.crypto_enabled:
+    if getattr(limits, "asset_class", None) == "crypto" or limits.crypto_enabled:
         out["crypto_positions"] = snapshot.get("crypto_positions") or []
     if snapshot.get("symbol_source"):
         out["symbol_source"] = snapshot["symbol_source"]

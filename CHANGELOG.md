@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Paper broker** (`src/simulation/`) — real order lifecycle (market, limit, stop, stop-limit) with resting orders re-evaluated each cycle, multi-asset FIFO positions with realized P&L, a configurable slippage/commission fill model, T+N settlement, and one-time migration of the existing ledger JSON.
 - **Bot dashboard panels** — options positions, crypto positions, paper trading (open orders with cancel, recent fills, realized P&L), and watchlists with the active symbol source highlighted.
 - **Context profile** — per-bot `minimal | standard | research` bounds how much market context rides along in each prompt; default stays `minimal`.
+- **Cursor model dropdown** — bot configuration lists every model from the live Cursor catalog, grouped into IDE / Cursor models vs third-party API usage.
 
 ### Fixed
 
@@ -34,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Exclusive asset class** — each bot trades equities, options, or crypto (not a mix). Watchlist items resolve by `list_id`, crypto bots read `currency_pair` entries (normalized to `BTC-USD`), an empty crypto pair list no longer blocks every pair, and mismatched order tools are denied before a paper fill.
 - **Cursor SDK integration** — dedicated `runner/cursor_agent.py` following Cursor production guidance: explicit local runtime and `api_key`, no ambient IDE settings, agent/run ID logging, startup vs mid-run error distinction, SDK bridge cleanup on shutdown.
 - **Prompt token optimization** — cycle prompts send minimal decision Context only (portfolio, holdings, quotes, 1h signals, last action, open orders); no order history dumps or raw bar arrays.
 - **Sleep prevention (Windows)** — keeps the system awake for scheduled bot cycles but no longer blocks monitor sleep or the screensaver (`ES_DISPLAY_REQUIRED` removed).

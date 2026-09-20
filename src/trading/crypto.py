@@ -49,14 +49,24 @@ async def preview_crypto_order(**args: Any) -> Any | None:
     return await _call("preview_crypto_order", args)
 
 
+_QUOTE_CCYS = ("USDT", "USDC", "USD", "EUR")
+
+
 def normalize_pair(value: Any) -> str:
-    """`btc-usd`, `BTC/USD`, and `BTC` all normalize to `BTC-USD`."""
-    text = str(value or "").strip().upper().replace("/", "-").replace("_", "-")
+    """`BTCUSD`, `btc-usd`, `BTC/USD`, and `BTC` all normalize to `BTC-USD`."""
+    text = str(value or "").strip().upper().replace("/", "-").replace("_", "-").replace(" ", "")
     if not text:
         return ""
-    if "-" not in text:
-        return f"{text}-USD"
-    return text
+    if "-" in text:
+        base, quote = text.split("-", 1)
+        quote = quote or "USD"
+        if base.endswith(quote) and len(base) > len(quote):
+            base = base[: -len(quote)]
+        return f"{base}-{quote}"
+    for suffix in _QUOTE_CCYS:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return f"{text[: -len(suffix)]}-{suffix}"
+    return f"{text}-USD"
 
 
 def base_currency(pair: Any) -> str:
@@ -64,9 +74,9 @@ def base_currency(pair: Any) -> str:
 
 
 def pair_allowed(pair: Any, allowed: list[str]) -> bool:
-    """Empty allowlist means no crypto pair is permitted."""
+    """Empty allowlist means any pair is permitted (same as equity allowed_symbols)."""
     if not allowed:
-        return False
+        return True
     target = normalize_pair(pair)
     return any(normalize_pair(a) == target for a in allowed)
 
@@ -119,6 +129,43 @@ def compact_crypto_positions(payload: Any) -> list[dict[str, Any]]:
             entry["pnl"] = round((mark - cost) * qty, 2)
         out.append(entry)
     return out
+
+
+def crypto_quotes_envelope(payload: Any) -> dict[str, Any]:
+    """Shape crypto quotes like the equity quotes envelope `_quote_prices` expects."""
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in _rows(payload, "quotes", "results"):
+        quote = row.get("quote") if isinstance(row.get("quote"), dict) else row
+        if not isinstance(quote, dict):
+            continue
+        symbol = normalize_pair(
+            quote.get("symbol")
+            or quote.get("pair")
+            or quote.get("currency_pair")
+            or quote.get("id")
+        )
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        last = _to_float(
+            quote.get("mark_price")
+            or quote.get("last_trade_price")
+            or quote.get("last_price")
+            or quote.get("price")
+            or quote.get("ask_price")
+        )
+        prev = _to_float(quote.get("previous_close") or quote.get("open_price") or quote.get("open"))
+        results.append(
+            {
+                "quote": {
+                    "symbol": symbol,
+                    "last_trade_price": last,
+                    "previous_close": prev,
+                }
+            }
+        )
+    return {"data": {"results": results}}
 
 
 def compact_currency_pairs(payload: Any, *, limit: int = 40) -> list[str]:

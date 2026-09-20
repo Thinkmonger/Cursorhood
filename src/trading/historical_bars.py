@@ -41,7 +41,7 @@ def _robinhood_enabled() -> bool:
         return False
 
 
-async def fetch_hourly_bars(symbols: list[str]) -> dict[str, Any]:
+async def fetch_hourly_bars(symbols: list[str], *, skip_robinhood: bool = False) -> dict[str, Any]:
     """Fetch 1-hour OHLCV bars plus SMA-20 for technical analysis."""
     unique = sorted({s.strip().upper() for s in symbols if s and str(s).strip()})
     limiter = get_massive_rate_limiter()
@@ -57,7 +57,7 @@ async def fetch_hourly_bars(symbols: list[str]) -> dict[str, Any]:
     needs_massive_retry: list[str] = []
 
     for symbol in unique:
-        entry = await _hourly_for_symbol(symbol)
+        entry = await _hourly_for_symbol(symbol, skip_robinhood=skip_robinhood)
         if entry.get("error") and massive_enabled():
             needs_massive_retry.append(symbol)
         out["symbols"][symbol] = entry
@@ -74,7 +74,7 @@ async def fetch_hourly_bars(symbols: list[str]) -> dict[str, Any]:
     return out
 
 
-async def fetch_daily_bars(symbols: list[str]) -> dict[str, Any]:
+async def fetch_daily_bars(symbols: list[str], *, skip_robinhood: bool = False) -> dict[str, Any]:
     """Fetch daily OHLCV candles through the same provider chain."""
     unique = sorted({s.strip().upper() for s in symbols if s and str(s).strip()})
     if not unique:
@@ -86,7 +86,7 @@ async def fetch_daily_bars(symbols: list[str]) -> dict[str, Any]:
         "provider": _chain_label(),
     }
     for symbol in unique:
-        out["symbols"][symbol] = await _daily_for_symbol(symbol)
+        out["symbols"][symbol] = await _daily_for_symbol(symbol, skip_robinhood=skip_robinhood)
     return out
 
 
@@ -100,8 +100,8 @@ def _chain_label() -> str:
     return "+".join(providers)
 
 
-async def _hourly_for_symbol(symbol: str) -> dict[str, Any]:
-    if _robinhood_enabled():
+async def _hourly_for_symbol(symbol: str, *, skip_robinhood: bool = False) -> dict[str, Any]:
+    if _robinhood_enabled() and not skip_robinhood:
         from src.trading.rh_market_data import fetch_bars
 
         entry = await fetch_bars(symbol, daily=False)
@@ -120,8 +120,8 @@ async def _hourly_for_symbol(symbol: str) -> dict[str, Any]:
     return await _fetch_yahoo_hourly_bars(symbol)
 
 
-async def _daily_for_symbol(symbol: str) -> dict[str, Any]:
-    if _robinhood_enabled():
+async def _daily_for_symbol(symbol: str, *, skip_robinhood: bool = False) -> dict[str, Any]:
+    if _robinhood_enabled() and not skip_robinhood:
         from src.trading.rh_market_data import fetch_bars
 
         entry = await fetch_bars(symbol, daily=True)

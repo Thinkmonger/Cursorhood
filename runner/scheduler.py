@@ -133,7 +133,7 @@ class Scheduler:
             interval=app.cycle_interval_seconds,
             market_hours_only=limits.market_hours_only,
             active=self._scheduler_active() and not self._running_cycle,
-            trades_24_7=limits.crypto_enabled,
+            trades_24_7=limits.crypto_enabled or getattr(limits, "asset_class", "") == "crypto",
         )
 
     async def _loop(self) -> None:
@@ -142,7 +142,9 @@ class Scheduler:
             app = self.settings.read_bot_app()
             limits = self.settings.read_limits()
             # Crypto trades around the clock, so those bots keep cycling after the equity close.
-            market_only = limits.market_hours_only and not limits.crypto_enabled
+            market_only = limits.market_hours_only and not (
+                limits.crypto_enabled or getattr(limits, "asset_class", "") == "crypto"
+            )
             can_run = (
                 not self._paused
                 and app.scheduler_enabled

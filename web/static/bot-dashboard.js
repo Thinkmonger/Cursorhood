@@ -42,10 +42,9 @@ function toggleSimConfigFields() {
 }
 
 function toggleAssetClassFields() {
-  const optionsOn = document.getElementById("options-enabled")?.checked;
-  document.getElementById("options-block")?.classList.toggle("d-none", !optionsOn);
-  const cryptoOn = document.getElementById("crypto-enabled")?.checked;
-  document.getElementById("crypto-block")?.classList.toggle("d-none", !cryptoOn);
+  const cls = document.getElementById("asset-class")?.value || "equity";
+  document.getElementById("options-block")?.classList.toggle("d-none", cls !== "option");
+  document.getElementById("crypto-block")?.classList.toggle("d-none", cls !== "crypto");
 }
 
 function toggleSymbolSourceFields() {
@@ -465,8 +464,8 @@ function showCard(id, visible) {
 
 function renderAssetPanels(d) {
   const limits = d.limits || {};
-  renderOptionPositions(d.option_positions || [], !!limits.options_enabled);
-  renderCryptoPositions(d.crypto_positions || [], !!limits.crypto_enabled);
+  renderOptionPositions(d.option_positions || [], (limits.asset_class || "") === "option");
+  renderCryptoPositions(d.crypto_positions || [], (limits.asset_class || "") === "crypto");
   renderPaperPanel(d.paper);
   renderWatchlistsPanel(d.watchlists, d.symbol_source);
 }
@@ -570,24 +569,31 @@ function renderWatchlistsPanel(watchlists, symbolSource) {
 
   const el = document.getElementById("watchlists-list");
   if (!el) return;
+  const resolved = (symbolSource?.symbols || []).filter(Boolean);
+  let html = "";
+  if (resolved.length) {
+    html += `<div class="small mb-2"><span class="text-secondary">${escapeHtml(t("watchlists.thisCycle"))}:</span> <span class="font-monospace">${escapeHtml(resolved.join(", "))}</span></div>`;
+  }
   if (!rows.length) {
-    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("watchlists.empty"))}</p>`;
+    el.innerHTML = html + `<p class="text-secondary small mb-0">${escapeHtml(t("watchlists.empty"))}</p>`;
     return;
   }
   const activeRef = String(symbolSource?.source || "").split(":")[1] || "";
-  el.innerHTML = rows
-    .map((w) => {
-      const active = w.name && w.name.toLowerCase() === activeRef.toLowerCase();
-      const symbols = (w.symbols || []).join(", ");
-      return `<div class="d-flex justify-content-between align-items-start gap-2 py-2 border-bottom border-secondary-subtle">
+  el.innerHTML =
+    html +
+    rows
+      .map((w) => {
+        const active = w.name && w.name.toLowerCase() === activeRef.toLowerCase();
+        const symbols = (w.symbols || []).join(", ");
+        return `<div class="d-flex justify-content-between align-items-start gap-2 py-2 border-bottom border-secondary-subtle">
         <div class="flex-grow-1">
           <div class="fw-semibold small">${escapeHtml(w.name || "")}${active ? ` <span class="badge text-bg-info ms-1">${escapeHtml(t("watchlists.active"))}</span>` : ""}</div>
           <div class="text-secondary small text-truncate">${escapeHtml(symbols)}</div>
         </div>
         <button class="btn btn-outline-secondary btn-sm py-0" onclick="useWatchlist('${escapeHtml(w.name || "")}')">${escapeHtml(t("watchlists.use"))}</button>
       </div>`;
-    })
-    .join("");
+      })
+      .join("");
 }
 
 async function cancelPaperOrder(orderId) {
@@ -617,50 +623,120 @@ async function useWatchlist(name) {
   }
 }
 
-let subscriptionModelIds = new Set(["auto", "composer", "composer-2", "composer-2.5", "composer-2-fast"]);
+let subscriptionModelIds = new Set(["auto", "default", "composer", "composer-2", "composer-2.5", "composer-2-fast"]);
+let cursorModelCatalog = null;
 
 function isSubscriptionModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return false;
-  if (subscriptionModelIds.has(m) || m.startsWith("composer")) return true;
+  if (subscriptionModelIds.has(m) || m.startsWith("composer") || m.startsWith("grok") || m.startsWith("cursor-grok")) {
+    return true;
+  }
   return false;
 }
 
-function updateModelBillingWarning() {
-  const input = document.getElementById("model");
-  const warning = document.getElementById("model-subscription-warning");
-  if (!input || !warning) return;
-  warning.classList.toggle("d-none", !isSubscriptionModel(input.value));
+function selectedModelBilling(select) {
+  const opt = select?.selectedOptions?.[0];
+  if (opt?.dataset?.billing === "ide" || opt?.dataset?.billing === "api") {
+    return opt.dataset.billing;
+  }
+  return isSubscriptionModel(select?.value) ? "ide" : "api";
 }
 
-async function loadCursorApiModels() {
-  const datalist = document.getElementById("cursor-api-models");
-  if (!datalist) return;
+function updateModelBillingWarning() {
+  const select = document.getElementById("model");
+  const warning = document.getElementById("model-subscription-warning");
+  if (!select || !warning) return;
+  warning.classList.toggle("d-none", selectedModelBilling(select) !== "ide");
+}
+
+function makeModelOption(entry) {
+  const option = document.createElement("option");
+  const id = typeof entry === "string" ? entry : entry.id;
+  option.value = id;
+  option.textContent = (typeof entry === "string" ? entry : entry.label) || id;
+  option.dataset.billing = typeof entry === "string"
+    ? (isSubscriptionModel(id) ? "ide" : "api")
+    : (entry.billing || (isSubscriptionModel(id) ? "ide" : "api"));
+  return option;
+}
+
+function ensureModelOption(select, modelId) {
+  if (!select || !modelId) return;
+  const exists = Array.from(select.options).some((opt) => opt.value === modelId);
+  if (exists) return;
+  const option = makeModelOption({
+    id: modelId,
+    label: t("bot.modelCurrentOption", { id: modelId }),
+    billing: isSubscriptionModel(modelId) ? "ide" : "api",
+  });
+  const group = document.createElement("optgroup");
+  group.label = t("bot.modelCurrentOption", { id: modelId });
+  group.appendChild(option);
+  select.insertBefore(group, select.firstChild);
+}
+
+function fillModelSelect(data, selectedId) {
+  const select = document.getElementById("model");
+  if (!select) return;
+  if (Array.isArray(data?.subscription_models)) {
+    subscriptionModelIds = new Set(
+      data.subscription_models.map((id) => String(id).trim().toLowerCase()).filter(Boolean)
+    );
+  }
+  const wanted = String(selectedId || select.value || data?.default || "").trim();
+  select.innerHTML = "";
+  const groups = Array.isArray(data?.groups) && data.groups.length
+    ? data.groups
+    : [
+        {
+          id: "ide",
+          label: t("bot.modelGroupIde"),
+          billing: "ide",
+          models: (data?.subscription_models || []).map((id) => ({ id, label: id, billing: "ide" })),
+        },
+        {
+          id: "api",
+          label: t("bot.modelGroupApi"),
+          billing: "api",
+          models: (data?.models || [])
+            .filter((id) => !isSubscriptionModel(id))
+            .map((id) => ({ id, label: id, billing: "api" })),
+        },
+      ];
+  groups.forEach((group) => {
+    const models = group.models || [];
+    if (!models.length) return;
+    const optgroup = document.createElement("optgroup");
+    const i18nKey = group.id === "ide" ? "bot.modelGroupIde" : group.id === "api" ? "bot.modelGroupApi" : "";
+    const translated = i18nKey ? t(i18nKey) : "";
+    optgroup.label = translated && translated !== i18nKey ? translated : (group.label || i18nKey || group.id);
+    models.forEach((entry) => optgroup.appendChild(makeModelOption(entry)));
+    select.appendChild(optgroup);
+  });
+  if (!select.options.length && data?.models) {
+    (data.models || []).forEach((id) => select.appendChild(makeModelOption(id)));
+  }
+  ensureModelOption(select, wanted);
+  if (wanted) select.value = wanted;
+  else if (data?.default) select.value = data.default;
+  updateModelBillingWarning();
+}
+
+async function loadCursorApiModels(selectedId) {
+  const select = document.getElementById("model");
+  if (!select) return;
   try {
-    const data = await api("/api/settings/cursor/models");
-    if (Array.isArray(data.subscription_models)) {
-      subscriptionModelIds = new Set(
-        data.subscription_models.map((id) => String(id).trim().toLowerCase()).filter(Boolean)
-      );
+    if (!cursorModelCatalog) {
+      cursorModelCatalog = await api("/api/settings/cursor/models");
     }
-    datalist.innerHTML = "";
-    (data.models || []).forEach((modelId) => {
-      const option = document.createElement("option");
-      option.value = modelId;
-      datalist.appendChild(option);
-    });
-    const modelInput = document.getElementById("model");
-    if (modelInput && !modelInput.value && data.default) {
-      modelInput.value = data.default;
-    }
-    updateModelBillingWarning();
+    fillModelSelect(cursorModelCatalog, selectedId);
   } catch {
-    /* optional helper — config still works without suggestions */
+    fillModelSelect({ groups: [], models: [], default: selectedId }, selectedId);
   }
 }
 
 async function loadBotConfig() {
-  await loadCursorApiModels();
   const s = await api(settingsBase);
   document.getElementById("bot-name").value = s.name || "";
   document.getElementById("strategy").value = s.strategy;
@@ -673,7 +749,8 @@ async function loadBotConfig() {
   document.getElementById("market-hours").checked = l.market_hours_only;
   const a = s.app;
   document.getElementById("interval").value = a.cycle_interval_seconds;
-  document.getElementById("model").value = a.cursor_model;
+  await loadCursorApiModels(a.cursor_model);
+  if (a.cursor_model) document.getElementById("model").value = a.cursor_model;
   updateModelBillingWarning();
   document.getElementById("auto-start").checked = a.auto_start_scheduler;
   const simEl = document.getElementById("simulation-mode");
@@ -694,7 +771,9 @@ async function loadBotConfig() {
   setValue("context-profile", a.context_profile || "minimal");
   setChecked("scanners-enabled", a.scanners_enabled !== false);
 
-  setChecked("options-enabled", !!l.options_enabled);
+  const assetClass =
+    l.asset_class || (l.crypto_enabled ? "crypto" : l.options_enabled ? "option" : "equity");
+  setValue("asset-class", assetClass);
   setValue("max-option-contracts", l.max_option_contracts ?? 1);
   setValue("max-option-notional", l.max_option_notional_usd ?? 100);
   setValue("allowed-option-types", (l.allowed_option_types || ["call", "put"]).join(", "));
@@ -702,7 +781,6 @@ async function loadBotConfig() {
   setValue("max-dte", l.max_days_to_expiry ?? 60);
   setChecked("allow-option-selling", !!l.allow_option_selling);
 
-  setChecked("crypto-enabled", !!l.crypto_enabled);
   setValue("allowed-crypto-pairs", (l.allowed_crypto_pairs || []).join(", "));
   setValue("max-crypto-notional", l.max_crypto_notional_usd ?? 25);
 
@@ -739,10 +817,19 @@ async function loadWatchlistOptions() {
   const datalist = document.getElementById("watchlist-options");
   if (!datalist) return;
   try {
-    const { watchlists } = await api("/api/watchlists");
-    datalist.innerHTML = (watchlists || [])
-      .map((w) => `<option value="${escapeHtml(w.name || w.id || "")}"></option>`)
-      .join("");
+    const [{ watchlists }, popular] = await Promise.all([
+      api("/api/watchlists"),
+      api("/api/watchlists/popular").catch(() => ({ watchlists: [] })),
+    ]);
+    const names = new Set();
+    const options = [];
+    for (const w of [...(watchlists || []), ...(popular.watchlists || [])]) {
+      const name = w.name || w.id || "";
+      if (!name || names.has(name)) continue;
+      names.add(name);
+      options.push(`<option value="${escapeHtml(name)}"></option>`);
+    }
+    datalist.innerHTML = options.join("");
   } catch {
     /* watchlist suggestions are optional */
   }
@@ -846,9 +933,7 @@ async function saveBotConfig() {
     .value.split(",")
     .map((x) => x.trim())
     .filter(Boolean);
-  await api(`${settingsBase}/limits`, {
-    method: "PUT",
-    body: JSON.stringify({
+  const limitsPayload = {
       max_order_notional_usd: +document.getElementById("max-order").value,
       max_daily_loss_usd: +document.getElementById("max-loss").value,
       allowed_symbols: syms,
@@ -858,17 +943,21 @@ async function saveBotConfig() {
       symbol_source: document.getElementById("symbol-source")?.value || "static",
       symbol_source_ref: document.getElementById("symbol-source-ref")?.value.trim() || null,
       symbol_source_limit: +(document.getElementById("symbol-source-limit")?.value || 20),
-      options_enabled: document.getElementById("options-enabled")?.checked ?? false,
+      asset_class: document.getElementById("asset-class")?.value || "equity",
+      options_enabled: (document.getElementById("asset-class")?.value || "equity") === "option",
       max_option_contracts: +(document.getElementById("max-option-contracts")?.value || 1),
       max_option_notional_usd: +(document.getElementById("max-option-notional")?.value || 100),
       allowed_option_types: commaList("allowed-option-types"),
       min_days_to_expiry: +(document.getElementById("min-dte")?.value || 0),
       max_days_to_expiry: +(document.getElementById("max-dte")?.value || 60),
       allow_option_selling: document.getElementById("allow-option-selling")?.checked ?? false,
-      crypto_enabled: document.getElementById("crypto-enabled")?.checked ?? false,
+      crypto_enabled: (document.getElementById("asset-class")?.value || "equity") === "crypto",
       allowed_crypto_pairs: commaList("allowed-crypto-pairs"),
       max_crypto_notional_usd: +(document.getElementById("max-crypto-notional")?.value || 25),
-    }),
+  };
+  await api(`${settingsBase}/limits`, {
+    method: "PUT",
+    body: JSON.stringify(limitsPayload),
   });
   const simCash = parseOptionalMoney(document.getElementById("sim-cash-start")?.value);
   const modelValue = document.getElementById("model").value;

@@ -11,7 +11,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 - Run **multiple strategy bots** with their own markdown strategy, risk limits, schedule, and Cursor model.
 - Start in **simulation mode** — paper fills against a multi-asset ledger (equities, options, crypto) with FIFO realized P&L, resting limit/stop orders, and optional T+N settlement. Turn simulation off only when you are ready for live Agentic trades.
 - Trade from a **static symbol list**, one of your Robinhood **watchlists**, a popular list, or a saved **scan**.
-- Enable **single-leg options** and **crypto** per bot; crypto-enabled bots keep cycling 24/7 instead of sleeping at the equity close.
+- Pick **one asset class per bot** — equities, single-leg options, or crypto. Crypto bots keep cycling 24/7 instead of sleeping at the equity close.
 - Research symbols from `/research` (search, fundamentals, financials, earnings, news, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
 - Watch live activity, run history, portfolio sparklines, and per-bot statistics.
 
@@ -66,7 +66,7 @@ Legacy paths (`/setup`, `/settings`, `/agents`) redirect to the routes above.
 2. **Connect Robinhood** — **Configuration → Connect Robinhood** (desktop OAuth). If that fails, connect the MCP in Cursor (`Settings → Tools & MCPs → https://agent.robinhood.com/mcp/trading`) and enable **Use Cursor MCP**.
 3. **Confirm tools** — **Test Robinhood** should report the live catalog (currently 79 tools). Capability chips on the dashboard show which asset classes your account can reach.
 4. **Leave simulation on** until you trust the strategy. Default bots start in paper mode with `$500` simulated cash.
-5. Write a short **strategy.md** on the bot page, set **allowed symbols** (or a watchlist source), then **Start** the scheduler or run one cycle:
+5. Write a short **strategy.md** on the bot page, choose **equities / options / crypto**, set **allowed symbols** (or a watchlist source), then **Start** the scheduler or run one cycle:
 
 ```powershell
 python -m runner.main run-once
@@ -87,7 +87,7 @@ Each scheduled run:
 6. In simulation, the paper broker fills or rests the order; nothing is sent to Robinhood. In live mode, the order goes to your Agentic account.
 7. The agent must `log_event` so the dashboard and statistics stay in sync.
 
-If the market is closed and `market_hours_only` is on, equity/options bots sleep until the next open. Crypto-enabled bots keep cycling.
+If the market is closed and `market_hours_only` is on, equity and options bots sleep until the next open. Crypto bots keep cycling.
 
 ## Connections
 
@@ -104,12 +104,12 @@ Configure shared credentials on **Configuration** (`/?tab=config`):
 Cycles use the **Cursor SDK with your API key**. Most models bill **API usage** (SDK tag) on your Cursor dashboard.
 
 - Default model is **`composer-2.5`** (change per bot under **Cursor model**).
-- **`composer-*`** and **`auto`** are allowed but **warn** — they consume **Auto + Composer** subscription quota instead of API usage.
+- **Auto, Composer, and Cursor Grok** use included Cursor/IDE usage. Third-party models bill at the provider's API rate.
 - The SDK runs **locally** with explicit `local` runtime, inline MCP config, and no IDE project settings.
 - Each cycle uses `Agent.create` + `agent.send` with streaming and proper SDK disposal on shutdown.
 - `agent_id` and `cursor_run_id` show up in the activity timeline for debugging in the Cursor console.
 
-List models available to your key: `GET /api/settings/cursor/models`, or use the model field suggestions on the bot page.
+The bot **Cursor model** dropdown lists every model available to your key, grouped into **IDE / Cursor models** (Auto, Composer, Cursor Grok — included plan usage) and **API (third-party)** (Claude, GPT, Gemini, and others billed at the provider rate). `GET /api/settings/cursor/models` returns the same catalog.
 
 ### Market data
 
@@ -164,20 +164,21 @@ Useful limits (see the bot page for the full form):
 
 - **Symbol source** — `static`, `watchlist`, `popular_watchlist`, or `scan`, capped by `symbol_source_limit` (default 20). Empty resolution falls back to the static allowlist rather than trading blind.
 - **Equity caps** — `max_order_notional_usd`, `max_open_positions`, `max_daily_loss_usd`, `market_hours_only`, `min_seconds_between_orders`.
-- **Options** (off by default) — contract count, option notional (premium × 100 × qty), days-to-expiry window, call/put allowlist. Selling is blocked unless `allow_option_selling` is on. The hook also denies `exercise_option` — close the contract instead.
-- **Crypto** (off by default) — pair allowlist and notional cap; exempt from the equity market-hours gate.
+- **Asset class** — `equity` (default), `option`, or `crypto`. A bot cannot mix them; the other class's tools are hidden and the risk hook denies mismatched orders.
+- **Options** — contract count, option notional (premium × 100 × qty), days-to-expiry window, call/put allowlist. Selling is blocked unless `allow_option_selling` is on. The hook also denies `exercise_option` — close the contract instead.
+- **Crypto** — optional pair allowlist (empty = use the symbol source) and notional cap; exempt from the equity market-hours gate.
 - **Context profile** — `minimal` (default), `standard`, or `research`. Research context is opt-in so token cost stays low.
 
 Paper trading is a real broker, not a log of pretend fills: market/limit/stop/stop-limit orders, resting orders re-checked each cycle, cancels, FIFO lots, realized P&L, optional slippage/commission, and T+N settlement. Existing ledgers migrate once to the new schema. Run `python scripts/sim_regression.py` to exercise the engine without touching a live bot.
 
-**Context profile vs tools.** Account, watchlist, market-data, equity, and alert tools are always exposed. Options, crypto, and scanner tools appear only when enabled for that bot.
+**Context profile vs tools.** Account, watchlist, and alert tools are always exposed. Market-data and equity tools go to equities and options bots. Crypto tools go only to crypto bots. Scanner tools appear when enabled.
 
 | Bot configuration | Tools exposed | Schema tokens saved per cycle |
 |---|---|---|
 | Equities only | 53 / 79 | ~2,900 (33%) |
 | Equities + scanners | 59 / 79 | ~2,250 (25%) |
-| Equities + options | 65 / 79 | ~1,575 (18%) |
-| All asset classes | 79 / 79 | — |
+| Options | 65 / 79 | ~1,575 (18%) |
+| Crypto | ~31 / 79 | — |
 
 `GET /api/trading/capabilities` returns the live catalog grouped by category.
 
