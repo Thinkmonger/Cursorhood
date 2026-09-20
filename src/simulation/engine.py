@@ -113,6 +113,8 @@ def load_ledger(bot_id: str) -> dict[str, Any]:
         from src.simulation.migration import upgrade_ledger
 
         data = upgrade_ledger(data)
+        # Persist immediately, otherwise every read re-runs the upgrade.
+        save_ledger(bot_id, data)
     return data
 
 

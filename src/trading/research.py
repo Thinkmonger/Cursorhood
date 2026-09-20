@@ -17,6 +17,8 @@ from src.trading.rh_market_data import (
     fetch_fundamentals,
     fetch_price_book,
     fetch_technical_indicators,
+    payload_error,
+    unwrap,
 )
 from src.trading.trade_history import extract_mcp_data
 
@@ -34,6 +36,11 @@ _FUNDAMENTAL_KEYS = (
     "low_52_weeks",
     "average_volume",
     "volume",
+    "open",
+    "high",
+    "low",
+    "market_date",
+    "shares_outstanding",
     "sector",
     "industry",
     "description",
@@ -50,7 +57,7 @@ async def search_symbols(query: str, *, limit: int = 10) -> list[dict[str, Any]]
 
 
 def _compact_search(payload: Any, *, limit: int) -> list[dict[str, Any]]:
-    source = payload
+    source = unwrap(payload)
     if isinstance(source, dict):
         for key in ("results", "instruments", "data", "matches"):
             if isinstance(source.get(key), list):
@@ -79,8 +86,9 @@ def _compact_search(payload: Any, *, limit: int) -> list[dict[str, Any]]:
 
 
 def _first_row(payload: Any) -> dict[str, Any]:
+    payload = unwrap(payload)
     if isinstance(payload, dict):
-        for key in ("fundamentals", "results", "data"):
+        for key in ("fundamentals", "results", "books", "data"):
             value = payload.get(key)
             if isinstance(value, list) and value and isinstance(value[0], dict):
                 return value[0]
@@ -93,6 +101,7 @@ def _first_row(payload: Any) -> dict[str, Any]:
 
 
 def _list_rows(payload: Any, *keys: str) -> list[dict[str, Any]]:
+    payload = unwrap(payload)
     if isinstance(payload, list):
         return [r for r in payload if isinstance(r, dict)]
     if not isinstance(payload, dict):
@@ -101,6 +110,11 @@ def _list_rows(payload: Any, *keys: str) -> list[dict[str, Any]]:
         value = payload.get(key)
         if isinstance(value, list):
             return [r for r in value if isinstance(r, dict)]
+        # Per-symbol envelopes nest the rows one level deeper.
+        if isinstance(value, dict):
+            nested = _list_rows(value, *keys)
+            if nested:
+                return nested
     return []
 
 
@@ -128,33 +142,56 @@ def compact_earnings(payload: Any) -> list[dict[str, Any]]:
         }
         eps = row.get("eps")
         if isinstance(eps, dict):
-            entry.setdefault("eps_actual", eps.get("actual"))
-            entry.setdefault("eps_estimate", eps.get("estimate"))
+            if eps.get("actual") is not None:
+                entry.setdefault("eps_actual", eps["actual"])
+            if eps.get("estimate") is not None:
+                entry.setdefault("eps_estimate", eps["estimate"])
+        report = row.get("report")
+        if isinstance(report, dict) and report.get("date"):
+            entry.setdefault("report_date", report["date"])
         if entry:
             rows.append(entry)
     return rows
+
+
+_FINANCIAL_KEYS = (
+    "fiscal_year",
+    "fiscal_quarter",
+    "period_end_date",
+    "period",
+    "fiscal_period",
+    "revenue",
+    "gross_profit",
+    "net_income",
+    "net_margin",
+    "operating_income",
+    "eps",
+    "free_cash_flow",
+)
 
 
 def compact_financials(payload: Any) -> list[dict[str, Any]]:
+    """Per-period rows. Robinhood nests them under each symbol's `financials`."""
+    periods: list[dict[str, Any]] = []
+    for row in _list_rows(payload, "financials", "results"):
+        nested = row.get("financials")
+        if isinstance(nested, list):
+            periods.extend(r for r in nested if isinstance(r, dict))
+        else:
+            periods.append(row)
+
     rows: list[dict[str, Any]] = []
-    for row in _list_rows(payload, "financials", "results")[-MAX_FINANCIAL_ROWS:]:
-        entry = {
-            k: row.get(k)
-            for k in (
-                "period",
-                "fiscal_period",
-                "revenue",
-                "net_income",
-                "gross_profit",
-                "operating_income",
-                "eps",
-                "free_cash_flow",
-            )
-            if row.get(k) not in (None, "")
-        }
+    for row in periods[:MAX_FINANCIAL_ROWS]:
+        entry = {k: row.get(k) for k in _FINANCIAL_KEYS if row.get(k) not in (None, "")}
         if entry:
             rows.append(entry)
     return rows
+
+
+def _best_level(levels: Any) -> dict[str, Any]:
+    if isinstance(levels, list) and levels and isinstance(levels[0], dict):
+        return levels[0]
+    return {}
 
 
 def compact_price_book(payload: Any) -> dict[str, Any]:
@@ -170,6 +207,20 @@ def compact_price_book(payload: Any) -> dict[str, Any]:
         value = row.get(source)
         if value not in (None, ""):
             out[target] = value
+
+    # Current shape is depth ladders: {"asks": [...], "bids": [...]} (empty when closed).
+    for side, price_key, size_key in (("bids", "bid", "bid_size"), ("asks", "ask", "ask_size")):
+        level = _best_level(row.get(side))
+        price = level.get("price") or level.get("bid_price") or level.get("ask_price")
+        if isinstance(price, dict):
+            price = price.get("amount")
+        if price not in (None, "") and price_key not in out:
+            out[price_key] = price
+        size = level.get("quantity") or level.get("size")
+        if size not in (None, "") and size_key not in out:
+            out[size_key] = size
+    if row.get("updated_at") and out:
+        out["updated_at"] = row["updated_at"]
     return out
 
 
@@ -180,7 +231,12 @@ async def _call(tool: str, args: dict[str, Any]) -> Any | None:
     if not result.get("ok"):
         logger.debug("Robinhood %s failed: %s", tool, result.get("error"))
         return None
-    return extract_mcp_data(result)
+    data = extract_mcp_data(result)
+    error = payload_error(data)
+    if error:
+        logger.debug("Robinhood %s rejected args %s: %s", tool, args, error)
+        return None
+    return unwrap(data)
 
 
 async def fetch_news(symbol: str) -> Any | None:
@@ -188,7 +244,7 @@ async def fetch_news(symbol: str) -> Any | None:
 
 
 async def fetch_analyst_ratings(symbol: str) -> Any | None:
-    return await _call("get_equity_analyst_ratings", {"symbol": symbol})
+    return await _call("get_equity_analyst_ratings", {"symbols": [str(symbol).upper()]})
 
 
 async def fetch_politician_trades(symbol: str | None = None) -> Any | None:
@@ -203,14 +259,25 @@ async def fetch_sec_filing(filing_id: str) -> Any | None:
     return await _call("get_sec_filing", {"filing_id": filing_id})
 
 
+_NEWS_FIELD_ALIASES = {
+    "title": ("title", "headline"),
+    "source": ("publisher", "source", "author"),
+    "published_at": ("published_at", "updated_at", "created_at"),
+    "summary": ("preview_text", "summary", "description"),
+    "url": ("url", "article_url", "source_url"),
+}
+
+
 def compact_news(payload: Any, *, limit: int = 5) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in _list_rows(payload, "news", "articles", "results")[:limit]:
-        entry = {
-            k: row.get(k)
-            for k in ("title", "source", "published_at", "summary", "url")
-            if row.get(k) not in (None, "")
-        }
+        entry: dict[str, Any] = {}
+        for target, sources in _NEWS_FIELD_ALIASES.items():
+            for source in sources:
+                value = row.get(source)
+                if value not in (None, ""):
+                    entry[target] = value
+                    break
         if entry.get("summary"):
             entry["summary"] = str(entry["summary"])[:300]
         if entry:
@@ -218,13 +285,25 @@ def compact_news(payload: Any, *, limit: int = 5) -> list[dict[str, Any]]:
     return rows
 
 
+_RATING_KEYS = (
+    "num_buy_ratings",
+    "num_hold_ratings",
+    "num_sell_ratings",
+    "mean_price_target",
+    "high_price_target",
+    "low_price_target",
+    "target_price",
+    "summary",
+)
+
+
 def compact_ratings(payload: Any) -> dict[str, Any]:
     row = _first_row(payload)
-    return {
-        k: row.get(k)
-        for k in ("num_buy_ratings", "num_hold_ratings", "num_sell_ratings", "target_price", "summary")
-        if row.get(k) not in (None, "")
-    }
+    # Counts and targets live under a nested `ratings` object.
+    nested = row.get("ratings")
+    if isinstance(nested, dict):
+        row = {**row, **nested}
+    return {k: row.get(k) for k in _RATING_KEYS if row.get(k) not in (None, "")}
 
 
 async def research_report(symbol: str, *, include_financials: bool = True) -> dict[str, Any]:
@@ -255,6 +334,19 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
             return None
         return value
 
+    section_names = (
+        "fundamentals",
+        "indicators",
+        "earnings",
+        "price_book",
+        "news",
+        "analyst_ratings",
+        "financials",
+    )
+    unavailable = [
+        section_names[i] for i in range(len(results)) if _value(i) in (None, {}, [])
+    ]
+
     report: dict[str, Any] = {"ok": True, "symbol": ticker}
     fundamentals = compact_fundamentals(_value(0))
     if fundamentals:
@@ -278,4 +370,10 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
         financials = compact_financials(_value(6))
         if financials:
             report["financials"] = financials
+
+    if unavailable:
+        report["unavailable"] = unavailable
+    if not any(k in report for k in section_names):
+        report["ok"] = False
+        report["error"] = f"No research data returned for {ticker}"
     return report

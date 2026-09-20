@@ -170,7 +170,13 @@ class MCPClient:
 
             if is_simulation_mode(bot_id):
                 ledger = get_ledger(bot_id)
-                symbols.extend((ledger.get("positions") or {}).keys())
+                for position in (ledger.get("positions") or {}).values():
+                    # v2 keys look like "equity:AAPL"; quotes need the bare ticker,
+                    # and only equities belong in the equity quote/bar lookups.
+                    if not isinstance(position, dict) or not position.get("symbol"):
+                        continue
+                    if position.get("asset_class", "equity") == "equity":
+                        symbols.append(str(position["symbol"]))
         except Exception:
             pass
         symbols = sorted({str(s).upper() for s in symbols if s})
