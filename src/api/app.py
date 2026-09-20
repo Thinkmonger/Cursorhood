@@ -13,6 +13,7 @@ from src.api.bots import router as bots_router
 from src.api.settings import router as settings_router
 from src.api.statistics import router as statistics_router
 from src.api.system import router as system_router
+from src.api.trading import research_router, scans_router, watchlists_router
 from src.api.trading import router as trading_router
 from src.api.ws import websocket_endpoint
 from src.db.migrate import DEFAULT_BOT_ID
@@ -48,6 +49,9 @@ def create_app() -> FastAPI:
     app.include_router(bots_router)
     app.include_router(bot_settings_router)
     app.include_router(trading_router)
+    app.include_router(research_router)
+    app.include_router(scans_router)
+    app.include_router(watchlists_router)
     app.include_router(statistics_router)
     app.include_router(system_router)
 
@@ -106,6 +110,10 @@ def create_app() -> FastAPI:
     @app.get("/statistics")
     async def statistics_page():
         return _html_page("statistics.html")
+
+    @app.get("/research")
+    async def research_page():
+        return _html_page("research.html")
 
     @app.get("/setup")
     async def setup_redirect():

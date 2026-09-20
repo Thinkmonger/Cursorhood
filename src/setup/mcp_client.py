@@ -11,6 +11,8 @@ from src.trading.trade_history import (
     extract_mcp_data,
 )
 from src.http_client import async_client
+from src.trading.mcp_tools import refresh_remote_tool_cache
+from src.trading.watchlists import resolve_symbols
 
 MCP_URL = "https://agent.robinhood.com/mcp/trading"
 
@@ -59,6 +61,39 @@ class MCPClient:
             return {"ok": True, "raw": response.text}
         return {"ok": True, "result": data}
 
+    async def list_tools(self) -> dict[str, Any]:
+        """Fetch the remote Robinhood MCP tool catalog (tools/list)."""
+        if not self.token:
+            return {"ok": False, "error": "Not authenticated. Connect Robinhood in setup."}
+        import re
+
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        try:
+            async with async_client(timeout=60) as client:
+                response = await client.post(MCP_URL, json=payload, headers=headers)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        if response.status_code == 401:
+            return {"ok": False, "error": "Unauthorized — reconnect Robinhood."}
+        if response.status_code >= 400:
+            return {"ok": False, "error": response.text, "status": response.status_code}
+        raw = response.text
+        match = re.search(r"data: ({.*})", raw)
+        if not match:
+            return {"ok": False, "error": "Could not parse tools/list response"}
+        envelope = json.loads(match.group(1))
+        if "error" in envelope:
+            return {"ok": False, "error": envelope["error"]}
+        tools = (envelope.get("result") or {}).get("tools") or []
+        names = [str(t.get("name")) for t in tools if isinstance(t, dict) and t.get("name")]
+        refresh_remote_tool_cache(names)
+        return {"ok": True, "tools": tools, "tool_names": names}
+
     async def test_connection(self) -> dict[str, Any]:
         if not self.token and not TokenStore().get_access_token():
             return {
@@ -73,11 +108,16 @@ class MCPClient:
         if not accounts.get("ok"):
             return {"ok": False, "step": "get_accounts", **accounts}
         portfolio = await self.call_tool("get_portfolio")
-        return {
+        catalog = await self.list_tools()
+        out: dict[str, Any] = {
             "ok": True,
             "accounts": accounts.get("result"),
             "portfolio": portfolio.get("result"),
         }
+        if catalog.get("ok"):
+            out["tool_count"] = len(catalog.get("tool_names") or [])
+            out["tool_names"] = catalog.get("tool_names")
+        return out
 
     async def fetch_trading_snapshot(self, bot_id: str | None = None) -> dict[str, Any]:
         """Prefetch portfolio context and 1-hour bars for the agent prompt."""
@@ -111,10 +151,18 @@ class MCPClient:
             parsed = extract_mcp_data(result)
             snapshot[key] = _compact_mcp_result(parsed)
         symbols: list[str] = []
+        limits: Any = None
         try:
             from src.settings.service import SettingsService
 
-            symbols = list(SettingsService(bot_id).read_limits().allowed_symbols or [])
+            limits = SettingsService(bot_id).read_limits()
+            symbols, origin = await resolve_symbols(
+                source=limits.symbol_source,
+                ref=limits.symbol_source_ref,
+                static_symbols=list(limits.allowed_symbols or []),
+                limit=limits.symbol_source_limit,
+            )
+            snapshot["symbol_source"] = {"source": origin, "symbols": list(symbols)}
         except Exception:
             pass
         try:
@@ -149,7 +197,57 @@ class MCPClient:
                 broker_orders_payload = extract_mcp_data(orders_result)
 
         snapshot["trade_history"] = build_trade_history(bot_id, broker_orders_payload)
+
+        watchlists_result = await self.call_tool("get_watchlists")
+        if watchlists_result.get("ok"):
+            watchlists_data = extract_mcp_data(watchlists_result)
+            snapshot["watchlists"] = _compact_mcp_result(watchlists_data)
+
+        if limits is not None and getattr(limits, "options_enabled", False):
+            from src.trading.options import compact_option_positions, get_option_positions
+
+            positions = await get_option_positions(account_number)
+            rows = compact_option_positions(positions)
+            if rows:
+                snapshot["option_positions"] = rows
+
+        if limits is not None and getattr(limits, "crypto_enabled", False):
+            from src.trading.crypto import compact_crypto_positions, get_crypto_positions
+
+            positions = await get_crypto_positions(account_number)
+            rows = compact_crypto_positions(positions)
+            if rows:
+                snapshot["crypto_positions"] = rows
+
+        await self._add_research_context(bot_id, snapshot, symbols)
         return snapshot
+
+    async def _add_research_context(
+        self,
+        bot_id: str,
+        snapshot: dict[str, Any],
+        symbols: list[str],
+    ) -> None:
+        """Fundamentals and earnings, only for bots on the `research` context profile."""
+        if not symbols:
+            return
+        try:
+            from src.settings.service import SettingsService
+
+            if SettingsService(bot_id).read_bot_app().context_profile != "research":
+                return
+        except Exception:
+            return
+
+        from src.trading.research import compact_fundamentals
+        from src.trading.rh_market_data import fetch_earnings_calendar, fetch_fundamentals
+
+        fundamentals = compact_fundamentals(await fetch_fundamentals(symbols))
+        if fundamentals:
+            snapshot["fundamentals"] = fundamentals
+        calendar = await fetch_earnings_calendar(symbols)
+        if calendar:
+            snapshot["earnings_calendar"] = _compact_mcp_result(calendar, max_len=2000)
 
 
 def _compact_mcp_result(raw: Any, *, max_len: int = 6000) -> Any:

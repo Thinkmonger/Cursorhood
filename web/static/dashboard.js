@@ -318,6 +318,39 @@ async function loadConnections() {
   document.getElementById("conn-chips").innerHTML = chips.join(" ");
   connectionsLoaded = true;
   checkSetup();
+  if (c.robinhood_has_token) loadCapabilityChips();
+}
+
+const CAPABILITY_LABELS = {
+  equity: "capabilities.equity",
+  option: "capabilities.option",
+  crypto: "capabilities.crypto",
+  market_data: "capabilities.marketData",
+  watchlist: "capabilities.watchlist",
+  scanner: "capabilities.scanner",
+  alert: "capabilities.alert",
+};
+
+async function loadCapabilityChips() {
+  const el = document.getElementById("capability-chips");
+  if (!el) return;
+  try {
+    const caps = await api("/api/trading/capabilities");
+    if (!caps.ok) {
+      el.innerHTML = "";
+      return;
+    }
+    const chips = Object.entries(CAPABILITY_LABELS).map(([key, labelKey]) =>
+      connBadge(
+        caps.asset_classes?.[key] ? "text-bg-success" : "text-bg-secondary",
+        t(labelKey)
+      )
+    );
+    chips.unshift(connBadge("text-bg-info", t("capabilities.toolCount", { count: caps.tool_count })));
+    el.innerHTML = chips.join(" ");
+  } catch {
+    el.innerHTML = "";
+  }
 }
 
 async function saveKey() {
@@ -340,8 +373,13 @@ async function useCursorMcp() {
 }
 
 async function testRh() {
-  await api("/api/settings/robinhood/test", { method: "POST", body: "{}" });
-  toast(t("connections.mcpOk"));
+  const result = await api("/api/settings/robinhood/test", { method: "POST", body: "{}" });
+  const count = result.tool_count;
+  toast(
+    count != null
+      ? t("connections.mcpOkWithTools", { count })
+      : t("connections.mcpOk")
+  );
 }
 
 async function saveMassiveKey() {

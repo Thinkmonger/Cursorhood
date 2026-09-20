@@ -1,31 +1,30 @@
 # Robinhood Agentic Console
 
-Local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading), powered by the Cursor agent SDK and the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`.
+Local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading). It runs [Cursor](https://cursor.com) agents against the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`, with a dashboard, risk limits, paper trading, and optional extra market data.
 
-Run multiple strategy bots against your **Agentic account**, with simulation mode, risk limits, scheduler controls, live activity, and optional [Massive](https://massive.com/docs/rest/quickstart) market data for technical analysis.
+You keep the process on your machine. The agents trade only in your **Agentic account** (separate from your main Robinhood portfolio), and only after the local risk hook allows the order.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
-## Features
+## What you can do
 
-- **Multi-bot dashboard** — create bots, start/pause/stop schedulers, and view portfolio sparklines
-- **Simulation mode** — paper trades with optional live-portfolio context; reset and re-seed from configured cash
-- **Per-bot configuration** — strategy markdown, risk limits, cycle interval, Cursor model, max runs
-- **Run history & activity** — summaries, tool-call timeline, and WebSocket live updates
-- **Statistics** — aggregate and per-bot metrics from run history
-- **Connections** — Cursor API key, Massive API key, Robinhood OAuth, and MCP test (shared across bots)
-- **Massive market data** — 1-hour bars and SMA-20 prefetched for each cycle (rate-limited, Yahoo fallback)
-- **Power management (Windows)** — prevents system sleep while the bot runs; monitors and screensaver may still turn off
-- **Risk hooks** — `.cursor/hooks/check_trade.py` enforces each bot's limits before orders execute
-- **Internationalization** — UI copy in `locales/en.json` (English default)
+- Run **multiple strategy bots** with their own markdown strategy, risk limits, schedule, and Cursor model.
+- Start in **simulation mode** — paper fills against a multi-asset ledger (equities, options, crypto) with FIFO realized P&L, resting limit/stop orders, and optional T+N settlement. Turn simulation off only when you are ready for live Agentic trades.
+- Trade from a **static symbol list**, one of your Robinhood **watchlists**, a popular list, or a saved **scan**.
+- Enable **single-leg options** and **crypto** per bot; crypto-enabled bots keep cycling 24/7 instead of sleeping at the equity close.
+- Research symbols from `/research` (search, fundamentals, financials, earnings, news, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
+- Watch live activity, run history, portfolio sparklines, and per-bot statistics.
+
+Trades never bypass `.cursor/hooks/check_trade.py`. Uncertain setups skip the trade.
 
 ## Requirements
 
 - Python 3.11+
-- [Cursor API key](https://cursor.com/settings)
-- Robinhood **Agentic Trading** access
-- Funded **Agentic account** (separate from your main portfolio)
-- Optional: [Massive API key](https://massive.com/docs/rest/quickstart) for historical 1-hour bars (free tier: 5 calls/minute)
+- A [Cursor API key](https://cursor.com/settings) (cycles bill as **API usage**, not IDE Auto/Composer quota)
+- [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading) access and a **funded Agentic account**
+- Optional: [Massive API key](https://massive.com/docs/rest/quickstart) if you want Massive as a fallback when Robinhood historicals are unavailable (free tier: 5 calls/minute)
+
+New to Robinhood? Open an account with the referral link in [Support this project](#support-this-project) — you get a stock reward, and it helps the console stay maintained.
 
 ## Quick start
 
@@ -48,106 +47,94 @@ If `pip install` fails with SSL errors on Windows:
 pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -e .
 ```
 
-Open **http://127.0.0.1:8765/** in your browser.
+Open **http://127.0.0.1:8765/** in your browser. Stop the server with **Ctrl+C** in that terminal.
 
 | URL | Purpose |
 |-----|---------|
-| `/` | Dashboard — bots overview |
-| `/?tab=config` | Configuration — Cursor, Massive, and Robinhood connections |
-| `/bots/{id}` | Bot console — portfolio, scheduler, settings |
+| `/` | Dashboard — bots, capability chips, start/pause/stop |
+| `/?tab=config` | Shared connections — Cursor, Massive, Robinhood OAuth |
+| `/bots/{id}` | Bot console — portfolio, scheduler, risk, paper trading |
 | `/bots/{id}/agents` | Run history and live activity |
-| `/statistics` | Performance statistics |
+| `/research` | Symbol search, reports, scanners, watchlists |
+| `/statistics` | Aggregate and per-bot metrics |
 
 Legacy paths (`/setup`, `/settings`, `/agents`) redirect to the routes above.
 
-## Manual cycle
+### First-run checklist
+
+1. **Cursor key** — paste it on **Configuration**, or put `CURSOR_API_KEY` in `.env`.
+2. **Connect Robinhood** — **Configuration → Connect Robinhood** (desktop OAuth). If that fails, connect the MCP in Cursor (`Settings → Tools & MCPs → https://agent.robinhood.com/mcp/trading`) and enable **Use Cursor MCP**.
+3. **Confirm tools** — **Test Robinhood** should report the live catalog (currently 79 tools). Capability chips on the dashboard show which asset classes your account can reach.
+4. **Leave simulation on** until you trust the strategy. Default bots start in paper mode with `$500` simulated cash.
+5. Write a short **strategy.md** on the bot page, set **allowed symbols** (or a watchlist source), then **Start** the scheduler or run one cycle:
 
 ```powershell
 python -m runner.main run-once
+python -m runner.main run-once --bot trueagent
 ```
 
-Optional bot id:
+On Windows, the process keeps the PC from sleeping so scheduled cycles can fire. The monitor and screensaver may still turn off. Stopping the process restores normal power settings.
 
-```powershell
-python -m runner.main run-once --bot my-bot
-```
+## How a cycle works
 
-## Power management (Windows)
+Each scheduled run:
 
-While the dashboard or a manual cycle is running, the bot calls Windows `SetThreadExecutionState` with **`ES_SYSTEM_REQUIRED`** so the PC does not sleep and scheduled cycles can fire on time.
+1. Resolves the bot’s symbol universe (static list, watchlist, popular list, or scan).
+2. Prefetches portfolio, holdings, quotes, technicals, and (when enabled) option/crypto positions.
+3. Builds a bounded **Context** JSON — size depends on the bot’s `context_profile` (`minimal` by default).
+4. Starts a Cursor agent with only the MCP tool categories that bot needs.
+5. The agent may review then place an order, or skip. Every order hits the risk hook first.
+6. In simulation, the paper broker fills or rests the order; nothing is sent to Robinhood. In live mode, the order goes to your Agentic account.
+7. The agent must `log_event` so the dashboard and statistics stay in sync.
 
-| Behavior | While bot is running |
-|----------|----------------------|
-| System sleep / hibernate | **Prevented** |
-| Monitor power-off | Allowed |
-| Screensaver | Allowed |
-
-Sleep prevention is enabled automatically when you start `python -m runner.main` (server or `run-once`) and restored when the process exits. No environment variable is required. On non-Windows platforms this is currently a no-op.
-
-If you stop the bot process, normal Windows power settings apply again.
+If the market is closed and `market_hours_only` is on, equity/options bots sleep until the next open. Crypto-enabled bots keep cycling.
 
 ## Connections
 
-Configure shared credentials on the dashboard **Configuration** tab (`/?tab=config`):
+Configure shared credentials on **Configuration** (`/?tab=config`):
 
 | Connection | Purpose |
 |------------|---------|
-| **Cursor API key** | Powers agent cycles via the Cursor SDK (billed as **API usage**, not IDE Auto/Composer quota) |
-| **Massive API key** | 1-hour historical bars for technical rules (optional) |
-| **Robinhood** | OAuth to your Agentic account for live trades |
-
-### Robinhood authentication
-
-1. **Recommended:** Dashboard → **Configuration** → **Connect Robinhood** (desktop OAuth).
-2. **Fallback:** Connect MCP in Cursor (Settings → Tools & MCPs → `https://agent.robinhood.com/mcp/trading`), then enable **Use Cursor MCP** in the console.
-
-Trades execute only in your **Agentic account**.
+| **Cursor API key** | Powers agent cycles via the Cursor SDK |
+| **Massive API key** | Optional fallback for 1-hour bars |
+| **Robinhood** | OAuth to your Agentic account |
 
 ### Cursor API billing
 
-Agent cycles use the **Cursor SDK with your API key**. Most models bill against **API usage** on your Cursor dashboard (SDK tag).
+Cycles use the **Cursor SDK with your API key**. Most models bill **API usage** (SDK tag) on your Cursor dashboard.
 
-- Default model is **`composer-2.5`** (change per bot under **Configuration → Cursor model**).
+- Default model is **`composer-2.5`** (change per bot under **Cursor model**).
 - **`composer-*`** and **`auto`** are allowed but **warn** — they consume **Auto + Composer** subscription quota instead of API usage.
-- The SDK runs **locally** with explicit `local` runtime, inline MCP config, and **no IDE project settings** (`setting_sources` not loaded).
-- Each cycle uses `Agent.create` + `agent.send` with streaming, `run.wait()`, and proper SDK disposal on shutdown.
-- Startup failures (`CursorAgentError`) are logged separately from mid-run failures (`result.status == "error"`).
-- `agent_id` and `cursor_run_id` are logged and emitted to the dashboard for debugging in the Cursor console.
+- The SDK runs **locally** with explicit `local` runtime, inline MCP config, and no IDE project settings.
+- Each cycle uses `Agent.create` + `agent.send` with streaming and proper SDK disposal on shutdown.
+- `agent_id` and `cursor_run_id` show up in the activity timeline for debugging in the Cursor console.
 
-List models available to your key: `GET /api/settings/cursor/models` or use the model field suggestions in the bot dashboard.
+List models available to your key: `GET /api/settings/cursor/models`, or use the model field suggestions on the bot page.
 
-### Massive market data
+### Market data
 
-When `MASSIVE_API_KEY` is set, each cycle prefetches **1-hour OHLCV bars** (and SMA-20 when available) into `historical_bars_1h` for the agent prompt. Robinhood MCP does not expose historical bars, so Massive (or Yahoo as fallback) fills that gap.
+Bars and indicators resolve **Robinhood first** (`get_equity_historicals` + `get_equity_technical_indicators`), then **Massive**, then **Yahoo**. Each symbol’s entry carries a `provider` field so you can see the source. Native Robinhood indicators replace the locally computed SMA-20 when they are present; local math stays as the fallback.
 
-**Fetch order per symbol:**
+Bots emit only the indicators their strategy text mentions (RSI, MACD, Bollinger, ATR, VWAP, EMA, SMA-50/200). Unused indicators cost nothing.
 
-1. **Massive** — uses available quota (5 calls/minute on the free tier).
-2. **Yahoo Finance** — fallback when Massive quota is exhausted or a non-auth error occurs.
-3. **Wait + Massive retry** — if Yahoo also fails, the bot waits for quota and retries Massive (up to ~65s by default).
+You can set a Massive key in `.env` or from the console (**Save Massive Key** / **Test Massive**). With `MASSIVE_USE_SMA_ENDPOINT=true` (default), each Massive call returns hourly bars **and** SMA-20 via the [SMA indicator API](https://massive.com/docs/rest/stocks/technical-indicators/simple-moving-average).
 
-With `MASSIVE_USE_SMA_ENDPOINT=true` (default), each Massive call returns hourly bars **and** SMA-20 in one request via the [SMA indicator API](https://massive.com/docs/rest/stocks/technical-indicators/simple-moving-average) with `expand_underlying`.
+### Environment variables
 
-You can set the key in `.env` or from the console (**Save Massive Key** / **Test Massive**).
-
-## Environment variables
-
-Copy `.env.example` to `.env`. Keys can also be saved from the Configuration tab (written to `.env`).
+Copy `.env.example` to `.env`. Keys can also be saved from the Configuration tab.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CURSOR_API_KEY` | — | Cursor agent API key (required) |
-| `MASSIVE_API_KEY` | — | Massive REST API key (optional market data) |
+| `MASSIVE_API_KEY` | — | Massive REST API key (optional fallback) |
 | `MASSIVE_API_BASE_URL` | `https://api.massive.com` | Massive API base URL |
 | `MASSIVE_RATE_LIMIT_PER_MINUTE` | `5` | Client-side rate limit |
 | `MASSIVE_RETRY_WAIT_SECONDS` | `65` | Max wait when retrying Massive after Yahoo failure |
-| `MASSIVE_USE_SMA_ENDPOINT` | `true` | Bars + SMA-20 in one call per symbol |
+| `MASSIVE_USE_SMA_ENDPOINT` | `true` | Bars + SMA-20 in one Massive call per symbol |
 | `DASHBOARD_HOST` | `127.0.0.1` | Web console bind address |
 | `DASHBOARD_PORT` | `8765` | Web console port |
 | `OAUTH_CALLBACK_PORT` | `9876` | Robinhood OAuth callback port |
 | `SSL_VERIFY` | `true` | Set to `false` on Windows if Robinhood MCP HTTPS fails with certificate errors |
-
-Example `.env` snippet:
 
 ```env
 CURSOR_API_KEY=your_cursor_key
@@ -155,11 +142,11 @@ MASSIVE_API_KEY=your_massive_key
 SSL_VERIFY=false
 ```
 
-On some Windows setups, Python cannot verify Robinhood's TLS certificate chain; `SSL_VERIFY=false` is required for MCP calls to succeed. The app logs that warning **once per process**, not on every request.
+On some Windows setups, Python cannot verify Robinhood’s TLS certificate chain; `SSL_VERIFY=false` is required for MCP calls to succeed. The app logs that warning **once per process**, not on every request.
 
-## Configuration files
+## Bots, risk, and paper trading
 
-Each bot has its own strategy, limits, and scheduler settings. The **default** bot (`default`) uses the top-level `config/` folder; additional bots use `config/bots/{bot_id}/`.
+Each bot has its own strategy, limits, and scheduler. The **default** bot uses the top-level `config/` folder; additional bots use `config/bots/{bot_id}/`. New bots clone strategy and limits from default. Edit them from the bot’s **Configuration** tab.
 
 | Path | Purpose |
 |------|---------|
@@ -167,13 +154,51 @@ Each bot has its own strategy, limits, and scheduler settings. The **default** b
 | `config/limits.yaml` | Default bot risk limits |
 | `config/app.yaml` | Default bot scheduler and simulation settings |
 | `config/global.yaml` | Shared dashboard host/port (optional; created on save) |
-| `config/bots/{id}/strategy.md` | Per-bot strategy (e.g. `trueagent`) |
+| `config/bots/{id}/strategy.md` | Per-bot strategy |
 | `config/bots/{id}/limits.yaml` | Per-bot risk limits |
 | `config/bots/{id}/app.yaml` | Per-bot scheduler and simulation settings |
-| `.env` | API keys and environment overrides (see table above) |
-| `AGENTS.md` | Agent playbook (reference; cycle prompts use minimal Context JSON) |
+| `.env` | API keys and environment overrides |
+| `AGENTS.md` | Agent playbook (reference; cycle prompts use Context JSON) |
 
-New bots clone strategy and limits from the default bot. Edit per-bot settings from each bot's **Configuration** tab in the console.
+Useful limits (see the bot page for the full form):
+
+- **Symbol source** — `static`, `watchlist`, `popular_watchlist`, or `scan`, capped by `symbol_source_limit` (default 20). Empty resolution falls back to the static allowlist rather than trading blind.
+- **Equity caps** — `max_order_notional_usd`, `max_open_positions`, `max_daily_loss_usd`, `market_hours_only`, `min_seconds_between_orders`.
+- **Options** (off by default) — contract count, option notional (premium × 100 × qty), days-to-expiry window, call/put allowlist. Selling is blocked unless `allow_option_selling` is on. The hook also denies `exercise_option` — close the contract instead.
+- **Crypto** (off by default) — pair allowlist and notional cap; exempt from the equity market-hours gate.
+- **Context profile** — `minimal` (default), `standard`, or `research`. Research context is opt-in so token cost stays low.
+
+Paper trading is a real broker, not a log of pretend fills: market/limit/stop/stop-limit orders, resting orders re-checked each cycle, cancels, FIFO lots, realized P&L, optional slippage/commission, and T+N settlement. Existing ledgers migrate once to the new schema. Run `python scripts/sim_regression.py` to exercise the engine without touching a live bot.
+
+**Context profile vs tools.** Account, watchlist, market-data, equity, and alert tools are always exposed. Options, crypto, and scanner tools appear only when enabled for that bot.
+
+| Bot configuration | Tools exposed | Schema tokens saved per cycle |
+|---|---|---|
+| Equities only | 53 / 79 | ~2,900 (33%) |
+| Equities + scanners | 59 / 79 | ~2,250 (25%) |
+| Equities + options | 65 / 79 | ~1,575 (18%) |
+| All asset classes | 79 / 79 | — |
+
+`GET /api/trading/capabilities` returns the live catalog grouped by category.
+
+## Robinhood MCP tools
+
+The proxy forwards Robinhood’s live `tools/list` and merges it with a categorized baseline in `src/trading/mcp_tools.py`. Unknown tools Robinhood ships later still register; a name heuristic classifies them for the activity timeline and the risk hook.
+
+The live catalog is **79 tools** across 8 categories (verified against an Agentic account, not only the [support article](https://robinhood.com/us/en/support/articles/trading-with-your-agent/)):
+
+| Category | Count | Tools |
+|----------|-------|-------|
+| Account | 5 | `get_accounts`, `get_portfolio`, `get_realized_pnl`, `get_pnl_trade_history`, `search` |
+| Watchlists | 12 | `get_watchlists`, `get_watchlist_items`, `get_option_watchlist`, `get_popular_watchlists`, `create_watchlist`, `update_watchlist`, `follow_watchlist`, `unfollow_watchlist`, `add_to_watchlist`, `remove_from_watchlist`, `add_option_to_watchlist`, `remove_option_from_watchlist` |
+| Market data | 17 | `get_equity_historicals`, `get_equity_fundamentals`, `get_financials`, `get_equity_price_book`, `get_equity_technical_indicators`, `get_earnings_results`, `get_earnings_calendar`, `get_indexes`, `get_index_quotes`, `get_index_historicals`, `get_equity_news`, `get_equity_analyst_ratings`, `get_politician_trades`, `get_sec_filing`, `get_sec_filing_index`, `get_sec_filing_facts`, `get_sec_filing_facts_catalog` |
+| Equities | 13 | `get_equity_positions`, `get_equity_tax_lots`, `get_equity_quotes`, `get_equity_orders`, `get_equity_tradability`, `review_equity_order`, `place_equity_order`, `cancel_equity_order`, `get_advanced_orders`, `review_advanced_order`, `place_advanced_order`, `cancel_advanced_order`, `get_limited_margin_upgrade_info` |
+| Options | 12 | `get_option_level_upgrade_info`, `get_option_historicals`, `get_option_chains`, `get_option_instruments`, `get_option_quotes`, `get_option_positions`, `get_option_orders`, `review_option_order`, `place_option_order`, `cancel_option_order`, `exercise_option`, `cancel_option_exercise` |
+| Crypto | 8 | `get_currency_pairs`, `get_crypto_quotes`, `get_crypto_positions`, `get_crypto_orders`, `preview_crypto_order`, `place_crypto_order`, `cancel_crypto_order`, `get_crypto_account_onboarding_info` |
+| Scanners | 6 | `get_scans`, `get_scanner_filter_specs`, `create_scan`, `run_scan`, `update_scan_filters`, `update_scan_config` |
+| Alerts | 6 | `get_alerts`, `create_alert`, `update_alert`, `delete_alert`, `get_alert_log`, `mark_alerts_read` |
+
+Agents should **review before placing**: `review_equity_order`, `review_option_order`, `preview_crypto_order`.
 
 ## Internationalization
 
@@ -182,20 +207,31 @@ UI copy lives in `locales/en.json`. The web app loads strings via `web/static/i1
 ## Project layout
 
 ```
-runner/              Entry point and scheduler
+runner/              Entry point, scheduler, cycle prompts
 src/api/             FastAPI routes and WebSocket
-src/trading/         Historical bars (Massive/Yahoo), trade history, market hours
+src/trading/         MCP registry, market data, watchlists, options, crypto, research
+src/simulation/      Paper broker (engine, positions, fills, accounting)
 src/system/          Sleep prevention, server restart helpers
 src/i18n/            Server-side locale helpers
-src/simulation/      Paper trading ledger
-web/                 Dashboard HTML and static assets
+web/                 Dashboard, research page, static assets
 locales/             UI copy (English default)
 config/              Default YAML strategy and limits
+scripts/             Paper-broker regression
 .cursor/hooks/       Trade risk enforcement
 CHANGELOG.md         Release history
 AGENTS.md            Agent playbook for automated cycles
 ```
 
+## Support this project
+
+This console is free and local. Two easy ways to help if it is useful:
+
+**Open a Robinhood account with this referral.** New users who sign up at [join.robinhood.com/laurenw275](https://join.robinhood.com/laurenw275) can claim a **$5–$200 stock reward** (you are guaranteed at least $5 after linking a bank; 1 in 100 get $20, and 1 in 1,000 get $200 — [terms apply](https://join.robinhood.com/laurenw275)). You pick from a set of leading companies. For the signup to count as a referral you need to add money to the account. That also funds the Agentic account this console trades in.
+
+**Send a tip on Venmo.** If the console saved you time or you just like it, Venmo [Lee Whitworth](https://venmo.com/code?user_id=3116446615863296136&created=1789922505) (`@LeeWhitworth`). Completely optional.
+
+Neither is required to run the software.
+
 ## Disclosures
 
-You are responsible for all trades. Agentic trading involves significant risk. This software is not affiliated with Robinhood. Brokerage services through Robinhood Financial LLC (member SIPC).
+You are responsible for all trades. Agentic trading involves significant risk of loss, including the entire balance of the Agentic account. This software is not affiliated with, endorsed by, or a product of Robinhood. Brokerage services through Robinhood Financial LLC (member SIPC). Referral rewards are offered by Robinhood, not by this project; see Robinhood’s terms on the signup page. Tips via Venmo are voluntary and do not purchase support, trading advice, or any security.

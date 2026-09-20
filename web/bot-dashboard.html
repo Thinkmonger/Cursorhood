@@ -219,6 +219,73 @@
         </div>
       </div>
 
+      <div class="row g-3 mb-3">
+        <div class="col-lg-6 d-none" id="option-positions-card">
+          <div class="rh-card h-100">
+            <div class="rh-card-head"><i class="bi bi-diagram-3 me-1"></i> <span data-i18n="assets.optionPositionsTitle">Options Positions</span></div>
+            <div class="table-responsive">
+              <table class="table table-dark table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th data-i18n="assets.colContract">Contract</th>
+                    <th class="text-end" data-i18n="assets.colQty">Qty</th>
+                    <th class="text-end" data-i18n="assets.colMark">Mark</th>
+                    <th class="text-end" data-i18n="assets.colPl">P/L</th>
+                  </tr>
+                </thead>
+                <tbody id="option-positions-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6 d-none" id="crypto-positions-card">
+          <div class="rh-card h-100">
+            <div class="rh-card-head"><i class="bi bi-currency-bitcoin me-1"></i> <span data-i18n="assets.cryptoPositionsTitle">Crypto Positions</span></div>
+            <div class="table-responsive">
+              <table class="table table-dark table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th data-i18n="assets.colPair">Pair</th>
+                    <th class="text-end" data-i18n="assets.colQty">Qty</th>
+                    <th class="text-end" data-i18n="assets.colPrice">Price</th>
+                    <th class="text-end" data-i18n="assets.colPl">P/L</th>
+                  </tr>
+                </thead>
+                <tbody id="crypto-positions-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-lg-6 d-none" id="paper-trading-card">
+          <div class="rh-card h-100">
+            <div class="rh-card-head d-flex justify-content-between align-items-center">
+              <span><i class="bi bi-journal-text me-1"></i> <span data-i18n="paper.title">Paper Trading</span></span>
+              <span id="paper-pnl-badge" class="badge text-bg-secondary" data-i18n="common.emDash">—</span>
+            </div>
+            <div class="p-3">
+              <div class="stat-label mb-1" data-i18n="paper.openOrders">Open paper orders</div>
+              <div id="paper-open-orders" class="mb-3"></div>
+              <div class="stat-label mb-1" data-i18n="paper.recentFills">Recent fills</div>
+              <div id="paper-fills"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6 d-none" id="watchlists-card">
+          <div class="rh-card h-100">
+            <div class="rh-card-head d-flex justify-content-between align-items-center">
+              <span><i class="bi bi-bookmark-star me-1"></i> <span data-i18n="watchlists.title">Watchlists</span></span>
+              <span id="symbol-source-badge" class="badge text-bg-secondary" data-i18n="common.emDash">—</span>
+            </div>
+            <div class="rh-scroll p-3" style="max-height: 260px;">
+              <div id="watchlists-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="rh-card">
         <div class="rh-card-head d-flex justify-content-between align-items-center">
           <span data-i18n="bot.recentRuns">Recent Runs</span>
@@ -336,6 +403,123 @@
             <label class="form-check-label" for="auto-start" data-i18n="bot.autoStartScheduler">Auto-Start Scheduler On Launch</label>
           </div>
           <button class="btn btn-success btn-sm" onclick="saveBotConfig()" data-i18n="bot.saveConfiguration">Save Configuration</button>
+        </div>
+      </div>
+
+      <div class="rh-card mb-3">
+        <div class="rh-card-head" data-i18n="symbolSource.title">Symbol Source</div>
+        <div class="p-3">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="symbol-source" data-i18n="symbolSource.sourceLabel">Source</label>
+              <select id="symbol-source" class="form-select form-select-sm" onchange="toggleSymbolSourceFields()">
+                <option value="static" data-i18n="symbolSource.optStatic">Static list</option>
+                <option value="watchlist" data-i18n="symbolSource.optWatchlist">My watchlist</option>
+                <option value="popular_watchlist" data-i18n="symbolSource.optPopular">Robinhood popular list</option>
+                <option value="scan" data-i18n="symbolSource.optScan">Saved scan</option>
+              </select>
+            </div>
+            <div class="col-md-5" id="symbol-source-ref-block">
+              <label class="form-label" for="symbol-source-ref" data-i18n="symbolSource.refLabel">Watchlist / scan</label>
+              <input id="symbol-source-ref" class="form-control form-control-sm" list="watchlist-options" />
+              <datalist id="watchlist-options"></datalist>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="symbol-source-limit" data-i18n="symbolSource.limitLabel">Max symbols / cycle</label>
+              <input id="symbol-source-limit" type="number" min="1" max="100" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="context-profile" data-i18n="symbolSource.contextProfileLabel">Context profile</label>
+              <select id="context-profile" class="form-select form-select-sm">
+                <option value="minimal" data-i18n="symbolSource.profileMinimal">Minimal (lowest token cost)</option>
+                <option value="standard" data-i18n="symbolSource.profileStandard">Standard (adds indicators)</option>
+                <option value="research" data-i18n="symbolSource.profileResearch">Research (adds fundamentals)</option>
+              </select>
+              <div class="form-text" data-i18n="symbolSource.contextProfileHint">Controls how much market context rides along in each prompt.</div>
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+              <div class="form-check mb-2">
+                <input id="scanners-enabled" type="checkbox" class="form-check-input" />
+                <label class="form-check-label" for="scanners-enabled" data-i18n="symbolSource.scannersEnabled">Expose scanner tools to the agent</label>
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-success btn-sm mt-3" onclick="saveBotConfig()" data-i18n="bot.saveConfiguration">Save Configuration</button>
+        </div>
+      </div>
+
+      <div class="rh-card mb-3">
+        <div class="rh-card-head" data-i18n="assets.title">Asset Classes</div>
+        <div class="p-3">
+          <div class="form-check mb-2">
+            <input id="options-enabled" type="checkbox" class="form-check-input" onchange="toggleAssetClassFields()" />
+            <label class="form-check-label" for="options-enabled" data-i18n="assets.optionsEnabled">Enable single-leg options</label>
+            <div class="form-text" data-i18n="assets.optionsHint">Requires options approval on the Robinhood account. Selling stays blocked unless enabled below.</div>
+          </div>
+          <div id="options-block" class="row g-3 mb-3 d-none">
+            <div class="col-md-4">
+              <label class="form-label" for="max-option-contracts" data-i18n="assets.maxContracts">Max contracts / order</label>
+              <input id="max-option-contracts" type="number" min="1" max="1000" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="max-option-notional" data-i18n="assets.maxOptionNotional">Max option notional ($)</label>
+              <input id="max-option-notional" type="number" min="1" step="0.01" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="allowed-option-types" data-i18n="assets.allowedTypes">Allowed types</label>
+              <input id="allowed-option-types" class="form-control form-control-sm" placeholder="call, put" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="min-dte" data-i18n="assets.minDte">Min days to expiry</label>
+              <input id="min-dte" type="number" min="0" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="max-dte" data-i18n="assets.maxDte">Max days to expiry</label>
+              <input id="max-dte" type="number" min="0" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+              <div class="form-check mb-2">
+                <input id="allow-option-selling" type="checkbox" class="form-check-input" />
+                <label class="form-check-label" for="allow-option-selling" data-i18n="assets.allowSelling">Allow selling options</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-check mb-2">
+            <input id="crypto-enabled" type="checkbox" class="form-check-input" onchange="toggleAssetClassFields()" />
+            <label class="form-check-label" for="crypto-enabled" data-i18n="assets.cryptoEnabled">Enable crypto</label>
+            <div class="form-text" data-i18n="assets.cryptoHint">Crypto trades 24/7, so this bot keeps cycling after the equity close.</div>
+          </div>
+          <div id="crypto-block" class="row g-3 mb-3 d-none">
+            <div class="col-md-6">
+              <label class="form-label" for="allowed-crypto-pairs" data-i18n="assets.allowedPairs">Allowed pairs (comma)</label>
+              <input id="allowed-crypto-pairs" class="form-control form-control-sm" placeholder="BTC-USD, ETH-USD" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="max-crypto-notional" data-i18n="assets.maxCryptoNotional">Max crypto notional ($)</label>
+              <input id="max-crypto-notional" type="number" min="1" step="0.01" class="form-control form-control-sm" />
+            </div>
+          </div>
+
+          <div id="sim-realism-block" class="row g-3 d-none">
+            <div class="col-12">
+              <div class="stat-label" data-i18n="paper.realismTitle">Paper fill realism</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="sim-slippage" data-i18n="paper.slippage">Slippage (bps)</label>
+              <input id="sim-slippage" type="number" min="0" max="1000" step="1" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="sim-commission" data-i18n="paper.commission">Commission / order ($)</label>
+              <input id="sim-commission" type="number" min="0" max="100" step="0.01" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="sim-settlement" data-i18n="paper.settlement">Settlement days (T+N)</label>
+              <input id="sim-settlement" type="number" min="0" max="5" class="form-control form-control-sm" />
+            </div>
+          </div>
+
+          <button class="btn btn-success btn-sm mt-3" onclick="saveBotConfig()" data-i18n="bot.saveConfiguration">Save Configuration</button>
         </div>
       </div>
     </div>

@@ -41,6 +41,15 @@ async def update_limits(bot_id: str, body: LimitsConfig) -> dict[str, bool]:
     return {"saved": True}
 
 
+@router.patch("/limits")
+async def patch_limits(bot_id: str, body: dict[str, Any]) -> dict[str, bool]:
+    """Partial update, so the UI can flip one setting without resubmitting the form."""
+    settings = _settings(bot_id)
+    current = settings.read_limits().model_dump()
+    settings.write_limits(LimitsConfig(**{**current, **body}))
+    return {"saved": True}
+
+
 @router.put("/app")
 async def update_app(bot_id: str, body: BotAppConfig) -> dict[str, bool]:
     _settings(bot_id).write_bot_app(body)

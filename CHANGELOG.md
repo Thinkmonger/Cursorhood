@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Full Robinhood MCP catalog** — categorized registry in `src/trading/mcp_tools.py` covering all 79 live tools across account, watchlist, market-data, equity, option, crypto, scanner, and alert categories, with `asset_class_for_tool` and remote-merge for tools Robinhood ships later. Reconciled against a live `tools/list`, which turned up 22 tools absent from the support article: advanced orders, option exercise, alerts, news, analyst ratings, politician trades, SEC filings, index historicals, margin-upgrade info, and crypto onboarding.
+- **Per-bot tool filtering** — `ROBINHOOD_ENABLED_CATEGORIES` trims the proxy's `tools/list` to the bot's enabled asset classes; an equities-only bot sees 53 of 79 tools, cutting roughly 2,900 schema tokens (33%) from every cycle.
+- **Capabilities API and chips** — `GET /api/trading/capabilities` returns the live catalog grouped by category (5-minute cache); the dashboard shows which asset classes the connected account can trade.
+- **Robinhood-first market data** (`src/trading/rh_market_data.py`) — `get_equity_historicals` and native `get_equity_technical_indicators` lead a Robinhood → Massive → Yahoo provider chain; local SMA-20 remains the fallback and strategies pull only the indicators they mention.
+- **Watchlist-driven trading** (`src/trading/watchlists.py`) — all 12 watchlist tools plus `symbol_source` / `symbol_source_ref` / `symbol_source_limit`, resolved fresh each cycle and recorded in the run event.
+- **Single-leg options** (`src/trading/options.py`) — chains, instruments, quotes, positions, and orders with bounded near-the-money chain compaction, `option_positions` in Context, and options risk limits (contracts, notional, DTE window, type allowlist, selling blocked by default).
+- **Crypto** (`src/trading/crypto.py`) — pairs, quotes, positions, orders, and preview with a pair allowlist and notional cap; crypto-enabled bots are exempt from `market_hours_only` and keep cycling 24/7.
+- **Research and scanners** — `src/trading/research.py` and `src/trading/scanners.py` behind `/api/research/*`, `/api/scans/*`, and `/api/watchlists/*`, plus a new `/research` console page with symbol search, fundamentals, financials, earnings, indicators, price book, and a scanner builder.
+- **Paper broker** (`src/simulation/`) — real order lifecycle (market, limit, stop, stop-limit) with resting orders re-evaluated each cycle, multi-asset FIFO positions with realized P&L, a configurable slippage/commission fill model, T+N settlement, and one-time migration of the existing ledger JSON.
+- **Bot dashboard panels** — options positions, crypto positions, paper trading (open orders with cancel, recent fills, realized P&L), and watchlists with the active symbol source highlighted.
+- **Context profile** — per-bot `minimal | standard | research` bounds how much market context rides along in each prompt; default stays `minimal`.
+
+### Fixed
+
+- **Double paper fills** — the hook and `apply_status_log` could each record the same trade. The paper broker now owns every fill and de-duplicates on run plus event id.
+- **Options and crypto booked as equities** — in simulation mode `place_option_order` and `place_crypto_order` were recorded as equity fills at an equity quote price; orders now route by asset class with the correct contract multiplier.
+- **Ignored paper risk limits** — `max_open_positions` and `max_daily_loss_usd` are now enforced against the paper portfolio, not just live orders.
+- **Paper cancels did nothing** — `cancel_*_order` now cancels resting paper orders instead of denying with no state change.
+- **Contradictory simulation prompt** — the prompt no longer tells the agent both "no place/cancel" and "review before place"; it explains that orders are intercepted and filled on paper.
+- **Unfunded paper orders silently shrank** — a buy larger than paper buying power filled at whatever the cash allowed (draining the account to zero) instead of being rejected; it now rejects and names the shortfall, like a cash account.
+- **Fractional option contracts** — paper option orders sized by notional could book 1.25 contracts. Quantities are quantized per asset class, and an order that rounds to zero is rejected.
+- **Cost-less positions on ledger upgrade** — a v1 position missing `avg_cost` migrated to a zero-cost lot that later read as pure profit; such positions are now dropped with a warning, and common legacy key spellings are recognized.
+- **Option exercise** — `exercise_option` reaches the risk hook as an option write, and is denied in both live and simulation mode since exercising converts a contract into 100 shares well past the configured notional caps.
+
 ### Changed
 
 - **Cursor SDK integration** — dedicated `runner/cursor_agent.py` following Cursor production guidance: explicit local runtime and `api_key`, no ambient IDE settings, agent/run ID logging, startup vs mid-run error distinction, SDK bridge cleanup on shutdown.

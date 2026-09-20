@@ -65,6 +65,7 @@ function isNavActive(key, path) {
     return path === "/" || path === "/dashboard" || /^\/bots\/[^/]+/.test(path);
   }
   if (key === "statistics") return path.startsWith("/statistics");
+  if (key === "research") return path.startsWith("/research");
   return false;
 }
 
@@ -74,6 +75,7 @@ function initMainNav(options = {}) {
 
   const items = [
     { key: "dashboard", href: "/", label: t("nav.dashboard") },
+    { key: "research", href: "/research", label: t("nav.research") },
     { key: "statistics", href: "/statistics", label: t("nav.statistics") },
   ];
 
@@ -229,16 +231,93 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 const TRADING_TOOL_LABELS = {
+  // Account
   get_portfolio: "activity.toolGetPortfolio",
   get_accounts: "activity.toolGetAccounts",
+  get_realized_pnl: "activity.toolGetRealizedPnl",
+  get_pnl_trade_history: "activity.toolGetPnlTradeHistory",
+  search: "activity.toolSearch",
+  // Watchlists
+  get_watchlists: "activity.toolGetWatchlists",
+  get_watchlist_items: "activity.toolGetWatchlistItems",
+  get_option_watchlist: "activity.toolGetOptionWatchlist",
+  get_popular_watchlists: "activity.toolGetPopularWatchlists",
+  create_watchlist: "activity.toolCreateWatchlist",
+  update_watchlist: "activity.toolUpdateWatchlist",
+  follow_watchlist: "activity.toolFollowWatchlist",
+  unfollow_watchlist: "activity.toolUnfollowWatchlist",
+  add_to_watchlist: "activity.toolAddToWatchlist",
+  remove_from_watchlist: "activity.toolRemoveFromWatchlist",
+  add_option_to_watchlist: "activity.toolAddOptionToWatchlist",
+  remove_option_from_watchlist: "activity.toolRemoveOptionFromWatchlist",
+  // Market data
+  get_equity_historicals: "activity.toolGetEquityHistoricals",
+  get_equity_fundamentals: "activity.toolGetEquityFundamentals",
+  get_financials: "activity.toolGetFinancials",
+  get_equity_price_book: "activity.toolGetEquityPriceBook",
+  get_equity_technical_indicators: "activity.toolGetTechnicalIndicators",
+  get_earnings_results: "activity.toolGetEarningsResults",
+  get_earnings_calendar: "activity.toolGetEarningsCalendar",
+  get_indexes: "activity.toolGetIndexes",
+  get_index_quotes: "activity.toolGetIndexQuotes",
+  get_index_historicals: "activity.toolGetIndexHistoricals",
+  get_equity_news: "activity.toolGetEquityNews",
+  get_equity_analyst_ratings: "activity.toolGetAnalystRatings",
+  get_politician_trades: "activity.toolGetPoliticianTrades",
+  get_sec_filing: "activity.toolGetSecFiling",
+  get_sec_filing_index: "activity.toolGetSecFilingIndex",
+  get_sec_filing_facts: "activity.toolGetSecFilingFacts",
+  get_sec_filing_facts_catalog: "activity.toolGetSecFilingFactsCatalog",
+  // Equities
   get_equity_positions: "activity.toolGetEquityPositions",
+  get_equity_tax_lots: "activity.toolGetEquityTaxLots",
   get_equity_quotes: "activity.toolGetEquityQuotes",
   get_equity_orders: "activity.toolGetEquityOrders",
   get_equity_tradability: "activity.toolGetEquityTradability",
   review_equity_order: "activity.toolReviewEquityOrder",
   place_equity_order: "activity.toolPlaceEquityOrder",
   cancel_equity_order: "activity.toolCancelEquityOrder",
-  search: "activity.toolSearch",
+  get_limited_margin_upgrade_info: "activity.toolGetMarginUpgradeInfo",
+  get_advanced_orders: "activity.toolGetAdvancedOrders",
+  review_advanced_order: "activity.toolReviewAdvancedOrder",
+  place_advanced_order: "activity.toolPlaceAdvancedOrder",
+  cancel_advanced_order: "activity.toolCancelAdvancedOrder",
+  // Options
+  get_option_level_upgrade_info: "activity.toolGetOptionLevelUpgradeInfo",
+  get_option_historicals: "activity.toolGetOptionHistoricals",
+  get_option_chains: "activity.toolGetOptionChains",
+  get_option_instruments: "activity.toolGetOptionInstruments",
+  get_option_quotes: "activity.toolGetOptionQuotes",
+  get_option_positions: "activity.toolGetOptionPositions",
+  get_option_orders: "activity.toolGetOptionOrders",
+  review_option_order: "activity.toolReviewOptionOrder",
+  place_option_order: "activity.toolPlaceOptionOrder",
+  cancel_option_order: "activity.toolCancelOptionOrder",
+  exercise_option: "activity.toolExerciseOption",
+  cancel_option_exercise: "activity.toolCancelOptionExercise",
+  // Crypto
+  get_currency_pairs: "activity.toolGetCurrencyPairs",
+  get_crypto_account_onboarding_info: "activity.toolGetCryptoOnboarding",
+  get_crypto_quotes: "activity.toolGetCryptoQuotes",
+  get_crypto_positions: "activity.toolGetCryptoPositions",
+  get_crypto_orders: "activity.toolGetCryptoOrders",
+  preview_crypto_order: "activity.toolPreviewCryptoOrder",
+  place_crypto_order: "activity.toolPlaceCryptoOrder",
+  cancel_crypto_order: "activity.toolCancelCryptoOrder",
+  // Scanners
+  get_scans: "activity.toolGetScans",
+  get_scanner_filter_specs: "activity.toolGetScannerFilterSpecs",
+  create_scan: "activity.toolCreateScan",
+  run_scan: "activity.toolRunScan",
+  update_scan_filters: "activity.toolUpdateScanFilters",
+  update_scan_config: "activity.toolUpdateScanConfig",
+  // Alerts
+  get_alerts: "activity.toolGetAlerts",
+  create_alert: "activity.toolCreateAlert",
+  update_alert: "activity.toolUpdateAlert",
+  delete_alert: "activity.toolDeleteAlert",
+  get_alert_log: "activity.toolGetAlertLog",
+  mark_alerts_read: "activity.toolMarkAlertsRead",
 };
 
 const STATUS_ONLY_TOOLS = new Set(["log_event", "get_last_cycle"]);

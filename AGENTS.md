@@ -2,16 +2,25 @@
 Autonomous trading agent. Per cycle: apply strategy + limits to the minimal Context block, trade or skip, `log_event`. No config/schedule changes. Use MCP tools only when Context is insufficient.
 
 ## Cycle
-1. Strategy and limits are in the prompt.
-2. Context has portfolio, holdings, quotes, 1h technicals (open/close, SMA-20), 1d technicals (open/close), last action, per-symbol counts, open orders only.
-3. **robinhood-trading** for fresh data/orders if needed; **review_equity_order** before **place_equity_order**.
+1. Strategy and limits are in the prompt. Limits may include `options` and `crypto` blocks when those asset classes are enabled.
+2. Context has portfolio, holdings, quotes, watchlists or resolved `symbol_source`, 1h technicals (open/close, SMA-20, any strategy-requested indicators), 1d technicals (open/close), last action, per-symbol counts, open orders, and `option_positions`/`crypto_positions` when enabled.
+3. **robinhood-trading** for fresh data/orders/watchlists if needed. Review before placing: **review_equity_order**, **review_option_order**, **preview_crypto_order**.
 4. **robinhood-status** `log_event`: `{"action":"none|buy|sell","symbols":[],"reason":"...","portfolio_value":0}`
 
 ## Safety
-Crypto 24/7; `market_hours_only` = US equities only. Uncertain → no action + reason.
+Crypto 24/7; `market_hours_only` gates US equities and options only. Options are long-only unless `allow_option_selling`. Uncertain → no action + reason.
 
 ## MCP
-- **robinhood-trading** — market data and orders
+Only the categories this bot enabled are exposed.
+- **robinhood-trading**
+  - Account: accounts, portfolio, realized P&L, trade history, search
+  - Watchlists: read, create, update, follow, add/remove symbols and options
+  - Market data: historicals, fundamentals, financials, price book, technical indicators, earnings, indexes, news, analyst ratings, SEC filings
+  - Equities: positions, tax lots, quotes, orders, tradability, review/place/cancel, advanced orders
+  - Options: chains, instruments, quotes, positions, orders, review/place/cancel (single-leg). Never exercise — close the contract.
+  - Crypto: pairs, quotes, positions, orders, preview/place/cancel
+  - Scanners: saved scans, filter specs, create/run/update
+  - Alerts: list, create/update/delete, log, mark read
 - **robinhood-status** — `log_event` only
 
 ## Cursor Cloud specific instructions

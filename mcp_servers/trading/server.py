@@ -15,11 +15,20 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.setup.mcp_client import MCPClient
+from src.trading.mcp_tools import compact_watchlists_for_prompt, tool_allowed_for_categories
 from src.trading.trade_history import extract_mcp_data
 
 
 def _token() -> str | None:
     return os.environ.get("ROBINHOOD_MCP_TOKEN") or None
+
+
+def _enabled_categories() -> set[str] | None:
+    """Categories this bot may use, or None to expose everything."""
+    raw = (os.environ.get("ROBINHOOD_ENABLED_CATEGORIES") or "").strip()
+    if not raw:
+        return None
+    return {part.strip() for part in raw.split(",") if part.strip()}
 
 
 def _tool_from_remote(raw: dict[str, Any]) -> types.Tool:
@@ -32,26 +41,19 @@ def _tool_from_remote(raw: dict[str, Any]) -> types.Tool:
 
 
 async def _remote_tools(client: MCPClient) -> list[types.Tool]:
-    import re
-
-    from src.http_client import async_client
-    from src.setup.mcp_client import MCP_URL
-
-    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
-    headers = {
-        "Authorization": f"Bearer {client.token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
-    async with async_client(timeout=60) as http:
-        response = await http.post(MCP_URL, json=payload, headers=headers)
-    raw = response.text
-    match = re.search(r"data: ({.*})", raw)
-    if not match:
+    catalog = await client.list_tools()
+    if not catalog.get("ok"):
         return []
-    envelope = json.loads(match.group(1))
-    tools = (envelope.get("result") or {}).get("tools") or []
-    return [_tool_from_remote(t) for t in tools if isinstance(t, dict) and t.get("name")]
+    tools = catalog.get("tools") or []
+    categories = _enabled_categories()
+    out: list[types.Tool] = []
+    for tool in tools:
+        if not isinstance(tool, dict) or not tool.get("name"):
+            continue
+        if categories is not None and not tool_allowed_for_categories(str(tool["name"]), categories):
+            continue
+        out.append(_tool_from_remote(tool))
+    return out
 
 
 def _normalize_tool_result(parsed: Any) -> dict[str, Any] | types.CallToolResult:
@@ -118,8 +120,12 @@ def _filter_orders_payload(result: dict[str, Any]) -> dict[str, Any]:
 
 def _compact_tool_result(name: str, result: dict[str, Any]) -> dict[str, Any]:
     """Bound the size of runtime MCP tool results sent back to the agent (token control)."""
-    if name == "get_equity_orders":
+    if name in ("get_equity_orders", "get_option_orders", "get_crypto_orders"):
         result = _filter_orders_payload(result)
+    elif name == "get_watchlists":
+        compact = compact_watchlists_for_prompt(result)
+        if compact is not None:
+            result = {"data": {"watchlists": compact}}
     try:
         text = json.dumps(result, separators=(",", ":"))
     except (TypeError, ValueError):

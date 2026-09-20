@@ -2,6 +2,8 @@ from __future__ import annotations
 
 
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -26,9 +28,35 @@ class LimitsConfig(BaseModel):
 
     min_seconds_between_orders: int = Field(ge=0, le=3600)
 
+    symbol_source: Literal["static", "watchlist", "popular_watchlist", "scan"] = "static"
+
+    symbol_source_ref: str | None = None
+
+    symbol_source_limit: int = Field(default=20, ge=1, le=100)
+
+    options_enabled: bool = False
+
+    max_option_contracts: int = Field(default=1, ge=1, le=1000)
+
+    max_option_notional_usd: float = Field(default=100.0, gt=0, le=100_000)
+
+    min_days_to_expiry: int = Field(default=7, ge=0, le=1000)
+
+    max_days_to_expiry: int = Field(default=60, ge=0, le=2000)
+
+    allowed_option_types: list[str] = Field(default_factory=lambda: ["call", "put"])
+
+    allow_option_selling: bool = False
+
+    crypto_enabled: bool = False
+
+    allowed_crypto_pairs: list[str] = Field(default_factory=list)
+
+    max_crypto_notional_usd: float = Field(default=25.0, gt=0, le=100_000)
 
 
-    @field_validator("allowed_symbols", mode="before")
+
+    @field_validator("allowed_symbols", "allowed_crypto_pairs", mode="before")
 
     @classmethod
 
@@ -43,6 +71,38 @@ class LimitsConfig(BaseModel):
             return [s.strip().upper() for s in v.split(",") if s.strip()]
 
         return [str(s).strip().upper() for s in v if str(s).strip()]
+
+
+
+    @field_validator("allowed_option_types", mode="before")
+
+    @classmethod
+
+    def normalize_option_types(cls, v: object) -> list[str]:
+
+        if v is None or v == "":
+
+            return ["call", "put"]
+
+        raw = v.split(",") if isinstance(v, str) else list(v)
+
+        out = [str(s).strip().lower() for s in raw if str(s).strip()]
+
+        return [s for s in out if s in ("call", "put")] or ["call", "put"]
+
+
+
+    @field_validator("symbol_source_ref", mode="before")
+
+    @classmethod
+
+    def empty_ref_to_none(cls, v: object) -> object | None:
+
+        if v is None or (isinstance(v, str) and not v.strip()):
+
+            return None
+
+        return str(v).strip()
 
 
 
@@ -65,6 +125,16 @@ class BotAppConfig(BaseModel):
     simulation_include_live_portfolio: bool = False
 
     max_runs: int | None = Field(default=None, ge=1, le=1_000_000)
+
+    context_profile: Literal["minimal", "standard", "research"] = "minimal"
+
+    scanners_enabled: bool = True
+
+    simulation_slippage_bps: float = Field(default=0.0, ge=0, le=1000)
+
+    simulation_commission_per_order: float = Field(default=0.0, ge=0, le=100)
+
+    simulation_settlement_days: int = Field(default=0, ge=0, le=5)
 
 
 

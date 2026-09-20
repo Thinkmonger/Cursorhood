@@ -50,10 +50,17 @@ def next_market_open(after: datetime | None = None) -> datetime:
     raise RuntimeError("Could not find next market open")
 
 
-def seconds_until_next_wake(interval: int, market_hours_only: bool, now: datetime | None = None) -> float:
+def seconds_until_next_wake(
+    interval: int,
+    market_hours_only: bool,
+    now: datetime | None = None,
+    *,
+    trades_24_7: bool = False,
+) -> float:
+    """Seconds until the next cycle. Crypto-enabled bots never sleep to the open."""
     now = now or datetime.now(timezone.utc)
     now_et = to_et(now)
-    if not market_hours_only:
+    if not market_hours_only or trades_24_7:
         return float(interval)
     if not is_market_hours(now_et):
         nmo = next_market_open(now_et)
@@ -69,9 +76,10 @@ def compute_next_scheduled_run(
     market_hours_only: bool,
     active: bool,
     now: datetime | None = None,
+    trades_24_7: bool = False,
 ) -> datetime | None:
     if not active:
         return None
     now = now or datetime.now(timezone.utc)
-    secs = seconds_until_next_wake(interval, market_hours_only, now)
+    secs = seconds_until_next_wake(interval, market_hours_only, now, trades_24_7=trades_24_7)
     return now + timedelta(seconds=secs)

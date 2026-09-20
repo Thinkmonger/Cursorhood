@@ -254,14 +254,67 @@ async def bot_dashboard(bot_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Bot not found")
     mgr = get_bot_manager()
     settings = SettingsService(bot_id)
-    return {
+    limits = settings.read_limits()
+    payload: dict[str, Any] = {
         "bot_id": bot_id,
         "bot": store.get_bot(bot_id),
         "setup_complete": store.is_setup_complete(),
-        "limits": settings.read_limits().model_dump(),
+        "limits": limits.model_dump(),
         "app": settings.read_app().model_dump(),
         "last_runs": store.get_runs(limit=5, bot_id=bot_id),
         "active_run": store.get_active_run(bot_id=bot_id),
         "scheduler": mgr.scheduler_snapshot(bot_id),
         "profile_gate": get_profile_gate_status(bot_id=bot_id),
     }
+    payload.update(_last_cycle_assets(store, bot_id, limits))
+    return payload
+
+
+def _last_cycle_assets(store: Store, bot_id: str, limits: Any) -> dict[str, Any]:
+    """Options, crypto, watchlists, and paper state from the most recent cycle."""
+    from src.simulation.ledger import PaperBroker, is_simulation_mode
+
+    out: dict[str, Any] = {}
+    snapshot: dict[str, Any] = {}
+    for run in store.get_runs(limit=5, bot_id=bot_id):
+        for event in store.get_events(int(run["id"])):
+            if event.get("type") == "portfolio_snapshot" and (event.get("payload") or {}).get("ok"):
+                snapshot = event["payload"]
+                break
+        if snapshot:
+            break
+
+    if limits.options_enabled:
+        out["option_positions"] = snapshot.get("option_positions") or []
+    if limits.crypto_enabled:
+        out["crypto_positions"] = snapshot.get("crypto_positions") or []
+    if snapshot.get("symbol_source"):
+        out["symbol_source"] = snapshot["symbol_source"]
+
+    from src.trading.mcp_tools import compact_watchlists_for_prompt
+
+    watchlists = compact_watchlists_for_prompt(snapshot.get("watchlists"))
+    if watchlists:
+        out["watchlists"] = watchlists
+
+    if is_simulation_mode(bot_id):
+        broker = PaperBroker(bot_id)
+        ledger = broker.ledger
+        out["paper"] = {
+            "open_orders": broker.open_orders(),
+            "recent_fills": (ledger.get("trades") or [])[-15:],
+            "realized_pnl": round(float(ledger.get("realized_pnl") or 0), 2),
+        }
+    return out
+
+
+@router.delete("/{bot_id}/paper-orders/{order_id}")
+async def cancel_paper_order(bot_id: str, order_id: str) -> dict[str, Any]:
+    from src.simulation.ledger import cancel_paper_orders, is_simulation_mode
+
+    if not Store().get_bot(bot_id):
+        raise HTTPException(status_code=404, detail="Bot not found")
+    if not is_simulation_mode(bot_id):
+        raise HTTPException(status_code=400, detail="Simulation mode is not enabled for this bot")
+    cancelled = cancel_paper_orders(bot_id, order_id=order_id)
+    return {"ok": True, "cancelled": len(cancelled)}

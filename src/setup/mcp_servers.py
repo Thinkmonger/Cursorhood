@@ -71,9 +71,33 @@ def build_agent_mcp_servers(
             command=python_executable(),
             args=["-m", "mcp_servers.trading.server"],
             cwd=str(PROJECT_ROOT),
-            env=_mcp_subprocess_env({"ROBINHOOD_MCP_TOKEN": token}),
+            env=_mcp_subprocess_env(
+                {
+                    "ROBINHOOD_MCP_TOKEN": token,
+                    "ROBINHOOD_ENABLED_CATEGORIES": ",".join(sorted(_bot_categories(bot_id))),
+                }
+            ),
         )
     return servers
+
+
+def _bot_categories(bot_id: str) -> set[str]:
+    """Tool categories this bot should see. Keeps unused schemas out of the prompt."""
+    from src.trading.mcp_tools import CORE_CATEGORIES, enabled_categories
+
+    try:
+        from src.settings.service import SettingsService
+
+        settings = SettingsService(bot_id)
+        limits = settings.read_limits()
+        app = settings.read_bot_app()
+        return enabled_categories(
+            options=limits.options_enabled,
+            crypto=limits.crypto_enabled,
+            scanners=app.scanners_enabled,
+        )
+    except Exception:
+        return set(CORE_CATEGORIES)
 
 
 def runner_trading_ready(token: str | None, via_cursor: bool) -> tuple[bool, str]:

@@ -133,6 +133,7 @@ class Scheduler:
             interval=app.cycle_interval_seconds,
             market_hours_only=limits.market_hours_only,
             active=self._scheduler_active() and not self._running_cycle,
+            trades_24_7=limits.crypto_enabled,
         )
 
     async def _loop(self) -> None:
@@ -140,7 +141,8 @@ class Scheduler:
         while not self._shutdown:
             app = self.settings.read_bot_app()
             limits = self.settings.read_limits()
-            market_only = limits.market_hours_only
+            # Crypto trades around the clock, so those bots keep cycling after the equity close.
+            market_only = limits.market_hours_only and not limits.crypto_enabled
             can_run = (
                 not self._paused
                 and app.scheduler_enabled
@@ -257,8 +259,20 @@ class Scheduler:
                 stored_snapshot = {
                     k: v
                     for k, v in snapshot.items()
-                    if k not in ("historical_bars_1h", "historical_bars_1d", "accounts")
+                    if k
+                    not in (
+                        "historical_bars_1h",
+                        "historical_bars_1d",
+                        "accounts",
+                        "watchlists",
+                    )
                 }
+                # Keep watchlists, but only the compacted form the dashboard panel needs.
+                from src.trading.mcp_tools import compact_watchlists_for_prompt
+
+                compact_watchlists = compact_watchlists_for_prompt(snapshot.get("watchlists"))
+                if compact_watchlists:
+                    stored_snapshot["watchlists"] = {"data": {"watchlists": compact_watchlists}}
                 emit_agent_event(run_id, self.bot_id, "portfolio_snapshot", stored_snapshot)
             else:
                 emit_agent_event(

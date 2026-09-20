@@ -7,19 +7,7 @@ from typing import Any
 from src.db.migrate import DEFAULT_BOT_ID
 from src.db.store import Store
 from src.settings.service import SettingsService
-
-TRADING_TOOLS = frozenset({
-    "get_accounts",
-    "get_portfolio",
-    "get_equity_positions",
-    "get_equity_quotes",
-    "get_equity_orders",
-    "get_equity_tradability",
-    "review_equity_order",
-    "place_equity_order",
-    "cancel_equity_order",
-    "search",
-})
+from src.trading.mcp_tools import compact_watchlists_for_prompt, is_trading_tool
 
 _TERMINAL_ORDER_STATES = frozenset({
     "filled",
@@ -36,15 +24,30 @@ def _json_compact(obj: Any) -> str:
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
 
 
-def _essential_limits(limits: Any) -> dict[str, Any]:
-    return {
-        "allowed_symbols": limits.allowed_symbols,
+def _essential_limits(limits: Any, resolved_symbols: list[str] | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "allowed_symbols": resolved_symbols or limits.allowed_symbols,
         "max_open_positions": limits.max_open_positions,
         "max_order_notional_usd": limits.max_order_notional_usd,
         "max_daily_loss_usd": limits.max_daily_loss_usd,
         "market_hours_only": limits.market_hours_only,
         "min_seconds_between_orders": limits.min_seconds_between_orders,
     }
+    if limits.options_enabled:
+        out["options"] = {
+            "max_contracts": limits.max_option_contracts,
+            "max_notional_usd": limits.max_option_notional_usd,
+            "days_to_expiry": [limits.min_days_to_expiry, limits.max_days_to_expiry],
+            "allowed_types": limits.allowed_option_types,
+            "allow_selling": limits.allow_option_selling,
+        }
+    if limits.crypto_enabled:
+        out["crypto"] = {
+            "allowed_pairs": limits.allowed_crypto_pairs,
+            "max_notional_usd": limits.max_crypto_notional_usd,
+            "note": "Crypto trades 24/7 and is exempt from market_hours_only.",
+        }
+    return out
 
 
 def _holdings_for_prompt(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -68,7 +71,32 @@ def _holdings_for_prompt(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _technicals_for_prompt(bars_payload: dict[str, Any] | None) -> dict[str, Any]:
+_INDICATOR_ALIASES: dict[str, tuple[str, ...]] = {
+    "rsi": ("rsi", "rsi_14"),
+    "macd": ("macd", "macd_signal", "macd_histogram"),
+    "bollinger": ("bollinger_upper", "bollinger_middle", "bollinger_lower"),
+    "atr": ("atr",),
+    "vwap": ("vwap",),
+    "ema": ("ema_12", "ema_26"),
+    "sma_50": ("sma_50",),
+    "sma_200": ("sma_200",),
+}
+
+
+def requested_indicators(strategy: str) -> set[str]:
+    """Indicator keys the strategy text mentions, so Context carries only those."""
+    text = (strategy or "").lower()
+    keys: set[str] = set()
+    for alias, indicator_keys in _INDICATOR_ALIASES.items():
+        if alias in text:
+            keys.update(indicator_keys)
+    return keys
+
+
+def _technicals_for_prompt(
+    bars_payload: dict[str, Any] | None,
+    wanted: set[str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(bars_payload, dict):
         return {}
     out: dict[str, Any] = {}
@@ -94,6 +122,11 @@ def _technicals_for_prompt(bars_payload: dict[str, Any] | None) -> dict[str, Any
             row["sma_20_1h"] = sma_20
         if last_1h is not None and sma_20 is not None:
             row["below_sma_20"] = float(last_1h) < float(sma_20)
+        indicators = entry.get("indicators")
+        if wanted and isinstance(indicators, dict):
+            extra = {k: v for k, v in indicators.items() if k in wanted}
+            if extra:
+                row.update(extra)
         out[str(symbol).upper()] = row
     return out
 
@@ -162,6 +195,8 @@ def _open_orders_for_prompt(trade_history: dict[str, Any]) -> list[dict[str, Any
 def _minimal_decision_context(
     snapshot: dict[str, Any],
     allowed_symbols: list[str] | None = None,
+    indicators: set[str] | None = None,
+    profile: str = "minimal",
 ) -> dict[str, Any]:
     from src.stats.portfolio import _portfolio_fields, _quote_prices
 
@@ -190,7 +225,7 @@ def _minimal_decision_context(
         if quote_out:
             context["quotes"] = quote_out
 
-    technicals = _technicals_for_prompt(snapshot.get("historical_bars_1h"))
+    technicals = _technicals_for_prompt(snapshot.get("historical_bars_1h"), indicators)
     if technicals:
         context["technicals_1h"] = technicals
 
@@ -218,11 +253,39 @@ def _minimal_decision_context(
         if open_orders:
             context["open_orders"] = open_orders
 
+    symbol_source = snapshot.get("symbol_source")
+    if isinstance(symbol_source, dict) and not str(symbol_source.get("source", "")).startswith("static"):
+        context["symbol_source"] = symbol_source
+
+    # Watchlists only matter to the agent when they aren't already the symbol source.
+    if profile != "minimal" or not context.get("symbol_source"):
+        watchlists = compact_watchlists_for_prompt(snapshot.get("watchlists"))
+        if watchlists:
+            context["watchlists"] = watchlists
+
+    if snapshot.get("option_positions"):
+        context["option_positions"] = snapshot["option_positions"]
+    if snapshot.get("crypto_positions"):
+        context["crypto_positions"] = snapshot["crypto_positions"]
+
+    if profile == "research":
+        fundamentals = snapshot.get("fundamentals")
+        if fundamentals:
+            context["fundamentals"] = fundamentals
+        earnings = snapshot.get("earnings_calendar")
+        if earnings:
+            context["earnings_calendar"] = earnings
+
     sim_ctx = snapshot.get("simulation_context")
     if isinstance(sim_ctx, dict) and sim_ctx.get("mode") == "simulation":
-        context["simulation"] = {
-            "paper": sim_ctx.get("uses_live_portfolio") is False,
-        }
+        simulation: dict[str, Any] = {"paper": sim_ctx.get("uses_live_portfolio") is False}
+        for key, target in (
+            ("paper_open_orders", "open_paper_orders"),
+            ("paper_realized_pnl", "realized_pnl"),
+        ):
+            if sim_ctx.get(key):
+                simulation[target] = sim_ctx[key]
+        context["simulation"] = simulation
 
     return context
 
@@ -239,6 +302,7 @@ def build_cycle_prompt(
     from src.trading.profile_gate import get_profile_gate_status
 
     gate = get_profile_gate_status(bot_id=bot_id)
+    resolved_symbols = ((trading_snapshot or {}).get("symbol_source") or {}).get("symbols")
 
     parts: list[str] = [
         f"# Cycle {bot_id}",
@@ -256,26 +320,36 @@ def build_cycle_prompt(
         strategy,
         "",
         "## Limits",
-        _json_compact(_essential_limits(limits)),
+        _json_compact(_essential_limits(limits, resolved_symbols)),
     ]
 
     if trading_snapshot:
-        context = _minimal_decision_context(trading_snapshot, allowed_symbols=limits.allowed_symbols)
+        context = _minimal_decision_context(
+            trading_snapshot,
+            allowed_symbols=resolved_symbols or limits.allowed_symbols,
+            indicators=requested_indicators(strategy),
+            profile=app.context_profile,
+        )
         if context:
             parts.extend(["", "## Context", _json_compact(context)])
 
     if app.simulation_mode:
-        parts.append(
-            "SIM: no place/cancel; log_event required."
-            if not app.simulation_include_live_portfolio
-            else "SIM: no place/cancel; log_event required; live portfolio visible."
+        # Orders are intercepted and booked as paper fills, so the agent should
+        # trade normally rather than being told both "no orders" and "review first".
+        note = (
+            "SIM: paper trading. Place orders as usual — they are intercepted and "
+            "filled against the paper ledger, never sent to Robinhood. log_event required."
         )
+        if app.simulation_include_live_portfolio:
+            note += " Live portfolio visible."
+        parts.append(note)
 
     if gate.get("active"):
         parts.append("BLOCK: investor profile incomplete — no orders; log_event none.")
 
     parts.append(
-        "Apply strategy to Context. review_equity_order before place_equity_order. "
+        "Apply strategy to Context. Review before placing "
+        "(review_equity_order / review_option_order / preview_crypto_order). "
         "log_event once. Reply ≤2 sentences."
     )
 
@@ -331,7 +405,7 @@ def parse_sdk_message(run_id: int, message: Any) -> None:
         if tool and tool["name"] == "log_event":
             _apply_log_event_tool(run_id, tool.get("input") or {})
             return
-        if tool and tool["name"] in TRADING_TOOLS:
+        if tool and is_trading_tool(tool["name"]):
             _emit_tool_event(run_id, "tool_call", tool)
         return
 
@@ -351,7 +425,7 @@ def parse_sdk_message(run_id: int, message: Any) -> None:
                             run_id,
                             getattr(block, "input", None) or {},
                         )
-                    elif tool_name in TRADING_TOOLS:
+                    elif is_trading_tool(tool_name):
                         _maybe_emit_tool_call(
                             run_id,
                             tool_name,

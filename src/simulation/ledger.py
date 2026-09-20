@@ -1,15 +1,48 @@
-"""Per-bot paper portfolio for simulation mode."""
+"""Per-bot paper portfolio for simulation mode.
+
+Thin facade over the ``src.simulation`` package. The :class:`PaperBroker` in
+``engine.py`` owns all fills; everything here is snapshot shaping, seeding, and
+the status-log bridge that existing callers already import.
+"""
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
-from src.db.store import Store, bot_state_key
+from src.db.store import Store
 from src.settings.service import SettingsService
+from src.simulation import accounting, positions as pos
+from src.simulation.engine import (
+    LEDGER_KEY,
+    OrderIntent,
+    PaperBroker,
+    empty_ledger,
+    load_ledger,
+    save_ledger,
+)
+from src.simulation.quotes import merge_quotes, resolve_price, resolve_price_and_quotes
 
-LEDGER_KEY = "simulation_ledger"
 _CASH_UNSET = object()
+
+__all__ = [
+    "LEDGER_KEY",
+    "OrderIntent",
+    "PaperBroker",
+    "apply_simulation_snapshot_policy",
+    "apply_status_log",
+    "build_simulation_overview",
+    "cancel_paper_orders",
+    "get_ledger",
+    "is_simulation_mode",
+    "record_paper_order",
+    "replay_bot_history",
+    "reset_ledger_for_starting_cash",
+    "reset_simulation",
+    "save_ledger",
+    "seed_ledger_from_live",
+    "submit_paper_order",
+    "uses_live_portfolio_in_simulation",
+]
 
 
 def is_simulation_mode(bot_id: str) -> bool:
@@ -21,37 +54,73 @@ def uses_live_portfolio_in_simulation(bot_id: str) -> bool:
     return bool(app.simulation_mode and app.simulation_include_live_portfolio)
 
 
+def get_ledger(bot_id: str) -> dict[str, Any]:
+    return load_ledger(bot_id)
+
+
+def reset_ledger_for_starting_cash(bot_id: str) -> None:
+    save_ledger(bot_id, empty_ledger())
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quote_price(quotes_payload: Any, symbol: str) -> float | None:
+    from src.simulation.quotes import equity_price
+
+    return equity_price(quotes_payload, symbol)
+
+
+# Kept for callers that still want the merged-quotes tuple form.
+_resolve_quote_price = resolve_price_and_quotes
+_merge_quotes_payload = merge_quotes
+
+
+# ---------------------------------------------------------------- snapshots
+
+
 def _ledger_as_mcp_snapshot(
     ledger: dict[str, Any],
     quotes_payload: Any | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Shape the paper ledger like a Robinhood portfolio/positions payload."""
     cash = float(ledger.get("cash") or 0)
     invested = 0.0
     position_rows: list[dict[str, Any]] = []
-    for symbol, pos in sorted((ledger.get("positions") or {}).items()):
-        qty = float(pos.get("qty") or 0)
-        avg = float(pos.get("avg_cost") or 0)
-        price = _quote_price(quotes_payload, symbol) or avg
-        market_value = qty * price if price else qty * avg
-        invested += market_value
+    for position in _sorted_positions(ledger):
+        asset_class = str(position.get("asset_class") or pos.EQUITY)
+        symbol = str(position.get("symbol"))
+        price = resolve_price(symbol, asset_class, quotes_payload)
+        invested += pos.market_value(position, price)
+        if asset_class != pos.EQUITY:
+            continue
         position_rows.append(
             {
                 "symbol": symbol,
-                "quantity": qty,
-                "average_buy_price": avg,
+                "quantity": float(position.get("qty") or 0),
+                "average_buy_price": float(position.get("avg_cost") or 0),
                 "type": "equity",
             }
         )
-    total_value = cash + invested
     portfolio = {
         "data": {
             "cash": round(cash, 4),
-            "total_value": round(total_value, 4),
+            "total_value": round(cash + invested, 4),
             "equity_value": round(invested, 4),
         }
     }
-    positions = {"data": {"positions": position_rows}}
-    return portfolio, positions
+    return portfolio, {"data": {"positions": position_rows}}
+
+
+def _sorted_positions(ledger: dict[str, Any]) -> list[dict[str, Any]]:
+    book = ledger.get("positions") or {}
+    return [book[key] for key in sorted(book) if isinstance(book[key], dict)]
 
 
 def _filter_trade_history_for_simulation(trade_history: dict[str, Any]) -> dict[str, Any]:
@@ -85,16 +154,12 @@ def _filter_trade_history_for_simulation(trade_history: dict[str, Any]) -> dict[
 
 
 def apply_simulation_snapshot_policy(bot_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Swap live portfolio/positions for paper ledger when sim excludes live holdings."""
+    """Swap live portfolio/positions for the paper ledger when sim excludes live holdings."""
     if not is_simulation_mode(bot_id) or not snapshot.get("ok"):
         return snapshot
 
-    include_live = uses_live_portfolio_in_simulation(bot_id)
-    if include_live:
-        snapshot["simulation_context"] = {
-            "mode": "simulation",
-            "uses_live_portfolio": True,
-        }
+    if uses_live_portfolio_in_simulation(bot_id):
+        snapshot["simulation_context"] = {"mode": "simulation", "uses_live_portfolio": True}
         return snapshot
 
     replay_bot_history(bot_id)
@@ -108,9 +173,13 @@ def apply_simulation_snapshot_policy(bot_id: str, snapshot: dict[str, Any]) -> d
         )
         ledger = get_ledger(bot_id)
 
-    portfolio, positions = _ledger_as_mcp_snapshot(ledger, snapshot.get("quotes"))
-    sim_position_count = len((positions.get("data") or {}).get("positions") or [])
+    quotes = snapshot.get("quotes")
+    broker = PaperBroker(bot_id, ledger)
+    filled = broker.evaluate_resting_orders(quotes)
+    if filled:
+        ledger = broker.save()
 
+    portfolio, positions = _ledger_as_mcp_snapshot(ledger, quotes)
     out = {
         **snapshot,
         "portfolio": portfolio,
@@ -119,105 +188,54 @@ def apply_simulation_snapshot_policy(bot_id: str, snapshot: dict[str, Any]) -> d
             "mode": "simulation",
             "uses_live_portfolio": False,
             "paper_cash": ledger.get("cash"),
-            "paper_position_count": sim_position_count,
+            "paper_position_count": len((positions.get("data") or {}).get("positions") or []),
+            "paper_open_orders": len(broker.open_orders()),
+            "paper_realized_pnl": round(float(ledger.get("realized_pnl") or 0), 2),
         },
     }
+    option_rows = _positions_for_class(ledger, pos.OPTION, quotes)
+    if option_rows:
+        out["option_positions"] = option_rows
+    crypto_rows = _positions_for_class(ledger, pos.CRYPTO, quotes)
+    if crypto_rows:
+        out["crypto_positions"] = crypto_rows
     if snapshot.get("trade_history"):
         out["trade_history"] = _filter_trade_history_for_simulation(snapshot["trade_history"])
-
     return out
 
 
-def _empty_ledger() -> dict[str, Any]:
-    return {
-        "cash": 0.0,
-        "positions": {},
-        "trades": [],
-        "series": [],
-        "seeded": False,
-    }
-
-
-def get_ledger(bot_id: str) -> dict[str, Any]:
-    store = Store()
-    raw = store.get_bot_state(bot_id, LEDGER_KEY)
-    if not raw:
-        return _empty_ledger()
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else _empty_ledger()
-    except (json.JSONDecodeError, TypeError):
-        return _empty_ledger()
-
-
-def save_ledger(bot_id: str, ledger: dict[str, Any]) -> None:
-    Store().set_bot_state(bot_id, LEDGER_KEY, json.dumps(ledger))
-
-
-def _as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _quote_price(quotes_payload: Any, symbol: str) -> float | None:
-    from src.stats.portfolio import _quote_prices
-
-    prices = _quote_prices(quotes_payload)
-    row = prices.get(symbol.upper()) or {}
-    return _as_float(row.get("last_price"))
-
-
-def _merge_quotes_payload(existing: Any | None, extra: Any | None) -> Any | None:
-    if not extra:
-        return existing
-    if not existing:
-        return extra
-    if not isinstance(existing, dict) or not isinstance(extra, dict):
-        return extra or existing
-    existing_data = existing.get("data") if isinstance(existing.get("data"), dict) else {}
-    extra_data = extra.get("data") if isinstance(extra.get("data"), dict) else {}
-    merged_results: list[Any] = []
-    seen: set[str] = set()
-    for item in (extra_data.get("results") or []) + (existing_data.get("results") or []):
-        if not isinstance(item, dict):
+def _positions_for_class(
+    ledger: dict[str, Any],
+    asset_class: str,
+    quotes: Any | None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for position in _sorted_positions(ledger):
+        if str(position.get("asset_class")) != asset_class:
             continue
-        quote = item.get("quote") or {}
-        sym = str(quote.get("symbol") or "").upper()
-        if not sym or sym in seen:
-            continue
-        seen.add(sym)
-        merged_results.append(item)
-    return {"data": {**existing_data, **extra_data, "results": merged_results}}
+        symbol = str(position.get("symbol"))
+        price = resolve_price(symbol, asset_class, quotes)
+        meta = position.get("meta") or {}
+        row: dict[str, Any] = {
+            "symbol": symbol,
+            "qty": float(position.get("qty") or 0),
+            "avg_cost": float(position.get("avg_cost") or 0),
+        }
+        if asset_class == pos.CRYPTO:
+            row["pair"] = symbol
+        for key in ("expiry", "strike", "type"):
+            if meta.get(key) is not None:
+                row[key] = meta[key]
+        if price is not None:
+            row["mark"] = price
+            row["pnl"] = round(
+                pos.market_value(position, price) - pos.cost_basis(position), 2
+            )
+        rows.append(row)
+    return rows
 
 
-def _resolve_quote_price(
-    symbol: str,
-    quotes_payload: Any | None,
-    *,
-    fetch_if_missing: bool = True,
-) -> tuple[float | None, Any | None]:
-    price = _quote_price(quotes_payload, symbol)
-    if price is not None or not fetch_if_missing:
-        return price, quotes_payload
-    fetched = None
-    try:
-        from src.setup.mcp_client import fetch_equity_quotes_sync
-
-        fetched = fetch_equity_quotes_sync([symbol])
-    except Exception:
-        fetched = None
-    if not fetched:
-        return None, quotes_payload
-    merged = _merge_quotes_payload(quotes_payload, fetched)
-    return _quote_price(merged, symbol), merged
-
-
-def reset_ledger_for_starting_cash(bot_id: str) -> None:
-    save_ledger(bot_id, _empty_ledger())
+# ------------------------------------------------------------------ seeding
 
 
 def _build_seeded_ledger(
@@ -231,45 +249,44 @@ def _build_seeded_ledger(
     from src.stats.portfolio import _portfolio_fields, _position_rows
 
     app = SettingsService(bot_id).read_bot_app()
-    saved_cash = _as_float(app.simulated_cash_starting_value)
-    include_live_positions = uses_live_portfolio_in_simulation(bot_id)
     if configured_cash_override is not _CASH_UNSET:
         configured_cash = (
             None if configured_cash_override is None else _as_float(configured_cash_override)
         )
     else:
-        configured_cash = saved_cash
+        configured_cash = _as_float(app.simulated_cash_starting_value)
 
+    book: dict[str, Any] = {}
     if configured_cash is not None and configured_cash > 0:
         cash = configured_cash
-        positions: dict[str, Any] = {}
     else:
         portfolio = _portfolio_fields(portfolio_payload)
         cash = _as_float(portfolio.get("cash"))
-        live_total = _as_float(portfolio.get("total_value"))
         if cash is None or cash <= 0:
-            cash = live_total or 100.0
-
-        positions = {}
-        if include_live_positions:
+            cash = _as_float(portfolio.get("total_value")) or 100.0
+        if uses_live_portfolio_in_simulation(bot_id):
             for row in _position_rows(positions_payload):
-                symbol = row["symbol"]
                 qty = row["quantity"]
                 avg = row.get("average_buy_price")
-                if qty and avg:
-                    positions[symbol] = {"qty": qty, "avg_cost": avg}
+                if not qty or not avg:
+                    continue
+                position = pos.new_position(pos.EQUITY, row["symbol"])
+                pos.add_lot(position, float(qty), float(avg))
+                book[pos.position_key(pos.EQUITY, row["symbol"])] = position
 
     ts = datetime.now(timezone.utc).isoformat()
-    ledger = {
-        "cash": round(cash, 4),
-        "positions": positions,
-        "trades": [],
-        "series": [],
-        "seeded": True,
-        "seeded_at": ts,
-        "starting_cash": round(cash, 4),
-    }
-    _append_series_point(ledger, ts, quotes_payload)
+    ledger = empty_ledger()
+    ledger.update(
+        {
+            "cash": round(cash, 4),
+            "settled_cash": round(cash, 4),
+            "positions": book,
+            "seeded": True,
+            "seeded_at": ts,
+            "starting_cash": round(cash, 4),
+        }
+    )
+    PaperBroker(bot_id, ledger).append_series(ts, quotes_payload)
     return ledger
 
 
@@ -282,7 +299,6 @@ def seed_ledger_from_live(
     ledger = get_ledger(bot_id)
     if ledger.get("seeded"):
         return ledger
-
     ledger = _build_seeded_ledger(bot_id, portfolio_payload, positions_payload, quotes_payload)
     save_ledger(bot_id, ledger)
     return ledger
@@ -293,7 +309,7 @@ async def reset_simulation(
     *,
     configured_cash_override: float | None | object = _CASH_UNSET,
 ) -> dict[str, Any]:
-    """Clear paper ledger, wipe run history, and re-seed from config or live account."""
+    """Clear the paper ledger, wipe run history, and re-seed from config or live account."""
     if not is_simulation_mode(bot_id):
         raise ValueError("Simulation mode is not enabled for this bot")
 
@@ -321,25 +337,40 @@ async def reset_simulation(
     }
 
 
-def _append_series_point(
-    ledger: dict[str, Any],
-    ts: str,
-    quotes_payload: Any | None,
-) -> None:
-    total = _ledger_total_value(ledger, quotes_payload)
-    ledger.setdefault("series", []).append({"ts": ts, "value": round(total, 4)})
-    ledger["series"] = ledger["series"][-60:]
+# -------------------------------------------------------------- order entry
 
 
-def _ledger_total_value(ledger: dict[str, Any], quotes_payload: Any | None) -> float:
-    cash = float(ledger.get("cash") or 0)
-    total = cash
-    for symbol, pos in (ledger.get("positions") or {}).items():
-        qty = float(pos.get("qty") or 0)
-        avg = float(pos.get("avg_cost") or 0)
-        price = _quote_price(quotes_payload, symbol) or avg
-        total += qty * price
-    return total
+def submit_paper_order(
+    bot_id: str,
+    intent: OrderIntent,
+    quotes_payload: Any | None = None,
+) -> dict[str, Any]:
+    """Submit an order intent to the paper broker. The one place fills happen."""
+    broker = PaperBroker(bot_id)
+    result = broker.submit(intent, quotes_payload)
+    if not result.duplicate:
+        broker.append_series(intent.ts or datetime.now(timezone.utc).isoformat(), quotes_payload)
+        broker.save()
+    return {
+        "ok": result.ok,
+        "status": result.status,
+        "reason": result.reason,
+        "duplicate": result.duplicate,
+        "order": result.order,
+    }
+
+
+def cancel_paper_orders(
+    bot_id: str,
+    *,
+    order_id: str | None = None,
+    symbol: str | None = None,
+) -> list[dict[str, Any]]:
+    broker = PaperBroker(bot_id)
+    cancelled = broker.cancel(order_id=order_id, symbol=symbol)
+    if cancelled:
+        broker.save()
+    return cancelled
 
 
 def record_paper_order(
@@ -351,74 +382,38 @@ def record_paper_order(
     price: float | None,
     ts: str | None = None,
     quotes_payload: Any | None = None,
+    asset_class: str = pos.EQUITY,
+    meta: dict[str, Any] | None = None,
+    intent_key: str | None = None,
+    run_id: int | None = None,
+    order_type: str = "market",
+    limit_price: float | None = None,
+    stop_price: float | None = None,
+    quantity: float | None = None,
 ) -> dict[str, Any]:
-    symbol = symbol.upper()
-    side = side.lower()
-    ts = ts or datetime.now(timezone.utc).isoformat()
-    if not price or price <= 0:
-        return get_ledger(bot_id)
-
-    ledger = get_ledger(bot_id)
+    """Backward-compatible market-order entry point, now routed through the engine."""
     limits = SettingsService(bot_id).read_limits()
-    max_order = float(limits.max_order_notional_usd)
-    notional = min(max(notional, 0), max_order)
+    capped = min(max(float(notional or 0), 0), float(limits.max_order_notional_usd))
+    intent = OrderIntent(
+        symbol=symbol,
+        side=side,
+        asset_class=asset_class,
+        order_type=order_type,
+        qty=quantity,
+        notional=capped if quantity is None else None,
+        limit_price=limit_price,
+        stop_price=stop_price,
+        reference_price=price,
+        meta=meta or {},
+        intent_key=intent_key,
+        run_id=run_id,
+        ts=ts,
+    )
+    submit_paper_order(bot_id, intent, quotes_payload)
+    return get_ledger(bot_id)
 
-    positions = ledger.setdefault("positions", {})
-    cash = float(ledger.get("cash") or 0)
 
-    if side == "buy":
-        spend = min(notional, cash)
-        if spend <= 0:
-            return ledger
-        qty = spend / price
-        pos = positions.get(symbol, {"qty": 0.0, "avg_cost": price})
-        old_qty = float(pos.get("qty") or 0)
-        old_avg = float(pos.get("avg_cost") or price)
-        new_qty = old_qty + qty
-        new_avg = ((old_qty * old_avg) + (qty * price)) / new_qty if new_qty else price
-        positions[symbol] = {"qty": new_qty, "avg_cost": round(new_avg, 6)}
-        cash -= spend
-        ledger["trades"].append(
-            {
-                "ts": ts,
-                "action": "buy",
-                "symbol": symbol,
-                "qty": round(qty, 6),
-                "price": price,
-                "notional": round(spend, 4),
-            }
-        )
-    elif side == "sell":
-        pos = positions.get(symbol)
-        if not pos:
-            return ledger
-        qty = float(pos.get("qty") or 0)
-        if qty <= 0:
-            return ledger
-        sell_qty = qty if notional <= 0 else min(qty, notional / price)
-        proceeds = sell_qty * price
-        cash += proceeds
-        remaining = qty - sell_qty
-        if remaining <= 1e-8:
-            positions.pop(symbol, None)
-        else:
-            positions[symbol] = {"qty": remaining, "avg_cost": float(pos.get("avg_cost") or price)}
-        ledger["trades"].append(
-            {
-                "ts": ts,
-                "action": "sell",
-                "symbol": symbol,
-                "qty": round(sell_qty, 6),
-                "price": price,
-                "notional": round(proceeds, 4),
-            }
-        )
-
-    ledger["cash"] = round(cash, 4)
-    ledger["trades"] = ledger["trades"][-200:]
-    _append_series_point(ledger, ts, quotes_payload)
-    save_ledger(bot_id, ledger)
-    return ledger
+# --------------------------------------------------------- status-log bridge
 
 
 def _snapshot_from_run(store: Store, run_id: int) -> dict[str, Any] | None:
@@ -437,47 +432,6 @@ def _fill_key(event_id: int | None, symbol: str, action: str) -> str | None:
     return f"{event_id}:{symbol.upper()}:{action.lower()}"
 
 
-def _bootstrap_applied_fills(bot_id: str) -> None:
-    """Match existing paper trades to status_log events so replay stays idempotent."""
-    ledger = get_ledger(bot_id)
-    if ledger.get("applied_fills") is not None:
-        return
-
-    trades = ledger.get("trades") or []
-    if not trades:
-        ledger["applied_fills"] = []
-        save_ledger(bot_id, ledger)
-        return
-
-    applied: set[str] = set()
-    used_trade_idx: set[int] = set()
-    store = Store()
-    runs = store.get_runs(limit=500, bot_id=bot_id)
-    for run in reversed(runs):
-        for ev in store.get_events(int(run["id"])):
-            if ev.get("type") != "status_log":
-                continue
-            payload = ev.get("payload") or {}
-            action = str(payload.get("action", "none")).lower()
-            if action not in ("buy", "sell"):
-                continue
-            for sym in payload.get("symbols") or []:
-                sym_u = str(sym).upper()
-                key = _fill_key(int(ev["id"]), sym_u, action)
-                if not key:
-                    continue
-                for i, trade in enumerate(trades):
-                    if i in used_trade_idx:
-                        continue
-                    if trade.get("symbol") == sym_u and trade.get("action") == action:
-                        applied.add(key)
-                        used_trade_idx.add(i)
-                        break
-
-    ledger["applied_fills"] = sorted(applied)
-    save_ledger(bot_id, ledger)
-
-
 def apply_status_log(
     bot_id: str,
     run_id: int | None,
@@ -486,13 +440,13 @@ def apply_status_log(
     *,
     event_id: int | None = None,
 ) -> None:
+    """Fill from a logged decision, unless the hook already submitted that order."""
     if not is_simulation_mode(bot_id):
         return
 
     action = str(data.get("action", "none")).lower()
     if action not in ("buy", "sell"):
         return
-
     symbols = data.get("symbols") or []
     if not symbols:
         return
@@ -500,15 +454,11 @@ def apply_status_log(
     store = Store()
     snapshot = _snapshot_from_run(store, run_id) if run_id else None
     quotes = snapshot.get("quotes") if snapshot else None
-    portfolio = snapshot.get("portfolio") if snapshot else None
 
-    ledger = get_ledger(bot_id)
-    if not ledger.get("seeded") and portfolio:
-        seed_ledger_from_live(bot_id, portfolio, snapshot.get("positions"), quotes)
-        ledger = get_ledger(bot_id)
-
-    _bootstrap_applied_fills(bot_id)
-    applied = set(get_ledger(bot_id).get("applied_fills") or [])
+    if not get_ledger(bot_id).get("seeded") and snapshot and snapshot.get("portfolio"):
+        seed_ledger_from_live(
+            bot_id, snapshot["portfolio"], snapshot.get("positions"), quotes
+        )
 
     limits = SettingsService(bot_id).read_limits()
     notional = _as_float(data.get("notional") or data.get("order_notional"))
@@ -516,53 +466,34 @@ def apply_status_log(
         notional = float(limits.max_order_notional_usd)
     ts = ts or datetime.now(timezone.utc).isoformat()
 
-    missing_quotes = [
-        str(symbol).upper()
-        for symbol in symbols
-        if _quote_price(quotes, str(symbol).upper()) is None
-    ]
-    if missing_quotes:
-        try:
-            from src.setup.mcp_client import fetch_equity_quotes_sync
-
-            fetched = fetch_equity_quotes_sync(missing_quotes)
-            quotes = _merge_quotes_payload(quotes, fetched)
-        except Exception:
-            pass
-
     for symbol in symbols:
         sym = str(symbol).upper()
-        fill_key = _fill_key(event_id, sym, action)
-        if fill_key and fill_key in applied:
+        broker = PaperBroker(bot_id)
+        if broker.has_order_for(run_id, sym, action):
             continue
-        price, quotes = _resolve_quote_price(sym, quotes)
+        price, quotes = resolve_price_and_quotes(sym, quotes)
         if price is None:
             continue
-        record_paper_order(
-            bot_id,
+        intent = OrderIntent(
             symbol=sym,
             side=action,
-            notional=float(notional or limits.max_order_notional_usd),
-            price=price,
+            asset_class=pos.EQUITY,
+            notional=min(float(notional), float(limits.max_order_notional_usd)),
+            reference_price=price,
+            intent_key=_fill_key(event_id, sym, action),
+            run_id=run_id,
             ts=ts,
-            quotes_payload=quotes,
         )
-        if fill_key:
-            applied.add(fill_key)
-            ledger = get_ledger(bot_id)
-            ledger["applied_fills"] = sorted(applied)[-500:]
-            save_ledger(bot_id, ledger)
+        submit_paper_order(bot_id, intent, quotes)
 
 
 def replay_bot_history(bot_id: str) -> None:
-    """Apply any status_log buy/sell fills not yet recorded in the paper ledger."""
+    """Apply any status_log buy/sell decisions not yet recorded in the paper ledger."""
     if not is_simulation_mode(bot_id):
         return
 
-    _bootstrap_applied_fills(bot_id)
     store = Store()
-    runs = store.get_runs(limit=500, bot_id=bot_id)
-    for run in reversed(runs):
+    for run in reversed(store.get_runs(limit=500, bot_id=bot_id)):
         run_id = int(run["id"])
         snapshot = _snapshot_from_run(store, run_id)
         if snapshot and not get_ledger(bot_id).get("seeded"):
@@ -573,15 +504,18 @@ def replay_bot_history(bot_id: str) -> None:
                 snapshot.get("quotes"),
             )
         for ev in store.get_events(run_id):
-            if ev.get("type") == "status_log":
-                payload = ev.get("payload") or {}
-                apply_status_log(
-                    bot_id,
-                    run_id,
-                    payload,
-                    ts=ev.get("ts"),
-                    event_id=int(ev["id"]),
-                )
+            if ev.get("type") != "status_log":
+                continue
+            apply_status_log(
+                bot_id,
+                run_id,
+                ev.get("payload") or {},
+                ts=ev.get("ts"),
+                event_id=int(ev["id"]),
+            )
+
+
+# ------------------------------------------------------------------ reports
 
 
 def build_simulation_overview(
@@ -596,56 +530,61 @@ def build_simulation_overview(
     if not ledger.get("seeded"):
         return None
 
-    paper_symbols = list((ledger.get("positions") or {}).keys())
-    if paper_symbols:
-        missing = [s for s in paper_symbols if _quote_price(quotes_payload, s) is None]
-        if missing:
-            try:
-                from src.setup.mcp_client import fetch_equity_quotes_sync
+    equity_symbols = [
+        str(p.get("symbol"))
+        for p in _sorted_positions(ledger)
+        if str(p.get("asset_class")) == pos.EQUITY
+    ]
+    missing = [s for s in equity_symbols if _quote_price(quotes_payload, s) is None]
+    if missing:
+        try:
+            from src.setup.mcp_client import fetch_equity_quotes_sync
 
-                fetched = fetch_equity_quotes_sync(missing)
-                quotes_payload = _merge_quotes_payload(quotes_payload, fetched)
-            except Exception:
-                pass
+            quotes_payload = merge_quotes(quotes_payload, fetch_equity_quotes_sync(missing))
+        except Exception:
+            pass
 
+    broker = PaperBroker(bot_id, ledger)
     holdings: list[dict[str, Any]] = []
     invested = 0.0
     total_unrealized = 0.0
 
-    for symbol, pos in sorted((ledger.get("positions") or {}).items()):
-        qty = float(pos.get("qty") or 0)
-        avg_cost = float(pos.get("avg_cost") or 0)
-        last_price = _quote_price(quotes_payload, symbol) or avg_cost
-        market_value = qty * last_price if last_price else qty * avg_cost
-        cost_basis = qty * avg_cost
-        unrealized = market_value - cost_basis if cost_basis else None
+    for position in _sorted_positions(ledger):
+        asset_class = str(position.get("asset_class") or pos.EQUITY)
+        symbol = str(position.get("symbol"))
+        qty = float(position.get("qty") or 0)
+        avg_cost = float(position.get("avg_cost") or 0)
+        last_price = resolve_price(symbol, asset_class, quotes_payload) or avg_cost
+        value = pos.market_value(position, last_price)
+        basis = pos.cost_basis(position)
+        unrealized = value - basis if basis else None
         if unrealized is not None:
             total_unrealized += unrealized
-        invested += market_value
+        invested += value
         holdings.append(
             {
-                "symbol": symbol,
+                "symbol": pos.display_symbol(position),
+                "asset_class": asset_class,
                 "quantity": qty,
                 "average_buy_price": avg_cost,
                 "last_price": last_price,
-                "market_value": round(market_value, 4),
-                "cost_basis": round(cost_basis, 4),
+                "market_value": round(value, 4),
+                "cost_basis": round(basis, 4),
                 "unrealized_pl": round(unrealized, 4) if unrealized is not None else None,
-                "unrealized_pl_pct": round(unrealized / cost_basis * 100, 2)
-                if unrealized is not None and cost_basis
+                "unrealized_pl_pct": round(unrealized / basis * 100, 2)
+                if unrealized is not None and basis
                 else None,
+                "realized_pl": round(float(position.get("realized_pnl") or 0), 2),
                 "day_change_pct": None,
             }
         )
 
     cash = float(ledger.get("cash") or 0)
     total_value = cash + invested
-    cash_pct = round(cash / total_value * 100, 1) if total_value else None
-    invested_pct = round(invested / total_value * 100, 1) if total_value else None
-
     series = ledger.get("series") or []
     from src.stats.portfolio import _portfolio_change
 
+    realized = round(float(ledger.get("realized_pnl") or 0), 2)
     return {
         "ok": True,
         "source": "simulation",
@@ -654,14 +593,22 @@ def build_simulation_overview(
             "total_value": round(total_value, 4),
             "equity_value": round(invested, 4),
             "cash": round(cash, 4),
+            "unsettled_cash": accounting.unsettled_cash(ledger),
         },
         "holdings": holdings,
         "summary": {
             "position_count": len(holdings),
             "invested_value": round(invested, 2),
-            "cash_pct": cash_pct,
-            "invested_pct": invested_pct,
+            "cash_pct": round(cash / total_value * 100, 1) if total_value else None,
+            "invested_pct": round(invested / total_value * 100, 1) if total_value else None,
             "total_unrealized_pl": round(total_unrealized, 2) if holdings else None,
+            "total_realized_pl": realized,
+        },
+        "paper": {
+            "open_orders": broker.open_orders(),
+            "recent_fills": (ledger.get("trades") or [])[-20:],
+            "realized_pnl": realized,
+            "realized_pnl_today": accounting.realized_pnl_today(ledger),
         },
         "performance": {
             "portfolio_series": series[-30:],

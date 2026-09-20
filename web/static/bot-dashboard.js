@@ -37,6 +37,20 @@ function toggleSimConfigFields() {
   const simOn = document.getElementById("simulation-mode")?.checked;
   const block = document.getElementById("sim-cash-block");
   if (block) block.classList.toggle("d-none", !simOn);
+  const realism = document.getElementById("sim-realism-block");
+  if (realism) realism.classList.toggle("d-none", !simOn);
+}
+
+function toggleAssetClassFields() {
+  const optionsOn = document.getElementById("options-enabled")?.checked;
+  document.getElementById("options-block")?.classList.toggle("d-none", !optionsOn);
+  const cryptoOn = document.getElementById("crypto-enabled")?.checked;
+  document.getElementById("crypto-block")?.classList.toggle("d-none", !cryptoOn);
+}
+
+function toggleSymbolSourceFields() {
+  const source = document.getElementById("symbol-source")?.value || "static";
+  document.getElementById("symbol-source-ref-block")?.classList.toggle("d-none", source === "static");
 }
 
 function parseOptionalInt(value) {
@@ -435,9 +449,169 @@ async function refresh() {
     const limitsEl = document.getElementById("limits");
     if (limitsEl) limitsEl.innerHTML = renderRiskLimitsHtml(d.limits);
 
+    renderAssetPanels(d);
+
     const list = document.getElementById("runs");
     list.innerHTML = "";
     (d.last_runs || []).forEach((r) => list.appendChild(renderDashboardRunItem(r, botId)));
+  } catch (err) {
+    toast(String(err?.message || err));
+  }
+}
+
+function showCard(id, visible) {
+  document.getElementById(id)?.classList.toggle("d-none", !visible);
+}
+
+function renderAssetPanels(d) {
+  const limits = d.limits || {};
+  renderOptionPositions(d.option_positions || [], !!limits.options_enabled);
+  renderCryptoPositions(d.crypto_positions || [], !!limits.crypto_enabled);
+  renderPaperPanel(d.paper);
+  renderWatchlistsPanel(d.watchlists, d.symbol_source);
+}
+
+function emptyRow(colspan, key) {
+  return `<tr><td colspan="${colspan}" class="text-center text-secondary py-3">${escapeHtml(t(key))}</td></tr>`;
+}
+
+function renderOptionPositions(rows, enabled) {
+  showCard("option-positions-card", enabled);
+  const body = document.getElementById("option-positions-body");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = emptyRow(4, "assets.noOptionPositions");
+    return;
+  }
+  body.innerHTML = rows
+    .map((r) => {
+      const label = `${r.symbol} ${r.expiry || ""} ${r.strike ?? ""}${String(r.type || "").charAt(0).toUpperCase()}`;
+      return `<tr>
+        <td class="font-monospace small">${escapeHtml(label.trim())}</td>
+        <td class="text-end">${escapeHtml(String(r.qty ?? ""))}</td>
+        <td class="text-end">${escapeHtml(formatMoney(r.mark))}</td>
+        <td class="text-end ${plTextClass(r.pnl)}">${escapeHtml(formatMoney(r.pnl))}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function renderCryptoPositions(rows, enabled) {
+  showCard("crypto-positions-card", enabled);
+  const body = document.getElementById("crypto-positions-body");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = emptyRow(4, "assets.noCryptoPositions");
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (r) => `<tr>
+        <td class="font-monospace small">${escapeHtml(r.pair || r.symbol || "")}</td>
+        <td class="text-end">${escapeHtml(String(r.qty ?? ""))}</td>
+        <td class="text-end">${escapeHtml(formatMoney(r.price ?? r.mark))}</td>
+        <td class="text-end ${plTextClass(r.pnl)}">${escapeHtml(formatMoney(r.pnl))}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+function renderPaperPanel(paper) {
+  showCard("paper-trading-card", !!paper);
+  if (!paper) return;
+
+  const badge = document.getElementById("paper-pnl-badge");
+  if (badge) {
+    badge.textContent = t("paper.realizedBadge", { value: formatMoney(paper.realized_pnl) });
+    badge.className = "badge " + (Number(paper.realized_pnl) >= 0 ? "text-bg-success" : "text-bg-danger");
+  }
+
+  const ordersEl = document.getElementById("paper-open-orders");
+  if (ordersEl) {
+    const orders = paper.open_orders || [];
+    ordersEl.innerHTML = orders.length
+      ? orders
+          .map(
+            (o) => `<div class="d-flex justify-content-between align-items-center gap-2 py-1 border-bottom border-secondary-subtle">
+              <span class="small"><span class="badge text-bg-secondary me-1">${escapeHtml(String(o.side || "").toUpperCase())}</span>${escapeHtml(o.symbol || "")} <span class="text-secondary">${escapeHtml(o.order_type || "market")}</span></span>
+              <button class="btn btn-outline-danger btn-sm py-0" onclick="cancelPaperOrder('${escapeHtml(o.id)}')">${escapeHtml(t("paper.cancel"))}</button>
+            </div>`
+          )
+          .join("")
+      : `<p class="text-secondary small mb-0">${escapeHtml(t("paper.noOpenOrders"))}</p>`;
+  }
+
+  const fillsEl = document.getElementById("paper-fills");
+  if (fillsEl) {
+    const fills = (paper.recent_fills || []).slice().reverse();
+    fillsEl.innerHTML = fills.length
+      ? fills
+          .map(
+            (f) => `<div class="d-flex justify-content-between gap-2 py-1 small">
+              <span><span class="badge ${f.action === "buy" ? "text-bg-primary" : "text-bg-warning text-dark"} me-1">${escapeHtml(String(f.action || "").toUpperCase())}</span>${escapeHtml(f.symbol || "")}</span>
+              <span class="text-secondary">${escapeHtml(String(Number(f.qty).toFixed(4)))} @ ${escapeHtml(formatMoney(f.price))}${f.realized_pnl ? ` · <span class="${plTextClass(f.realized_pnl)}">${escapeHtml(formatMoney(f.realized_pnl))}</span>` : ""}</span>
+            </div>`
+          )
+          .join("")
+      : `<p class="text-secondary small mb-0">${escapeHtml(t("paper.noFills"))}</p>`;
+  }
+}
+
+function renderWatchlistsPanel(watchlists, symbolSource) {
+  const rows = watchlists || [];
+  showCard("watchlists-card", rows.length > 0 || !!symbolSource);
+
+  const badge = document.getElementById("symbol-source-badge");
+  if (badge) {
+    badge.textContent = symbolSource?.source || t("watchlists.sourceStatic");
+    badge.className =
+      "badge " + (symbolSource?.source?.startsWith("static") ? "text-bg-secondary" : "text-bg-info");
+  }
+
+  const el = document.getElementById("watchlists-list");
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("watchlists.empty"))}</p>`;
+    return;
+  }
+  const activeRef = String(symbolSource?.source || "").split(":")[1] || "";
+  el.innerHTML = rows
+    .map((w) => {
+      const active = w.name && w.name.toLowerCase() === activeRef.toLowerCase();
+      const symbols = (w.symbols || []).join(", ");
+      return `<div class="d-flex justify-content-between align-items-start gap-2 py-2 border-bottom border-secondary-subtle">
+        <div class="flex-grow-1">
+          <div class="fw-semibold small">${escapeHtml(w.name || "")}${active ? ` <span class="badge text-bg-info ms-1">${escapeHtml(t("watchlists.active"))}</span>` : ""}</div>
+          <div class="text-secondary small text-truncate">${escapeHtml(symbols)}</div>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm py-0" onclick="useWatchlist('${escapeHtml(w.name || "")}')">${escapeHtml(t("watchlists.use"))}</button>
+      </div>`;
+    })
+    .join("");
+}
+
+async function cancelPaperOrder(orderId) {
+  try {
+    await api(`/api/bots/${encodeURIComponent(botId)}/paper-orders/${encodeURIComponent(orderId)}`, {
+      method: "DELETE",
+    });
+    toast(t("paper.cancelled"));
+    refresh();
+    refreshPortfolio();
+  } catch (err) {
+    toast(String(err?.message || err));
+  }
+}
+
+async function useWatchlist(name) {
+  if (!name) return;
+  try {
+    await api(`${settingsBase}/limits`, {
+      method: "PATCH",
+      body: JSON.stringify({ symbol_source: "watchlist", symbol_source_ref: name }),
+    });
+    toast(t("watchlists.switched", { name }));
+    refresh();
   } catch (err) {
     toast(String(err?.message || err));
   }
@@ -513,9 +687,65 @@ async function loadBotConfig() {
   }
   const maxRunsEl = document.getElementById("max-runs");
   if (maxRunsEl) maxRunsEl.value = a.max_runs != null ? String(a.max_runs) : "";
+
+  setValue("symbol-source", l.symbol_source || "static");
+  setValue("symbol-source-ref", l.symbol_source_ref || "");
+  setValue("symbol-source-limit", l.symbol_source_limit ?? 20);
+  setValue("context-profile", a.context_profile || "minimal");
+  setChecked("scanners-enabled", a.scanners_enabled !== false);
+
+  setChecked("options-enabled", !!l.options_enabled);
+  setValue("max-option-contracts", l.max_option_contracts ?? 1);
+  setValue("max-option-notional", l.max_option_notional_usd ?? 100);
+  setValue("allowed-option-types", (l.allowed_option_types || ["call", "put"]).join(", "));
+  setValue("min-dte", l.min_days_to_expiry ?? 7);
+  setValue("max-dte", l.max_days_to_expiry ?? 60);
+  setChecked("allow-option-selling", !!l.allow_option_selling);
+
+  setChecked("crypto-enabled", !!l.crypto_enabled);
+  setValue("allowed-crypto-pairs", (l.allowed_crypto_pairs || []).join(", "));
+  setValue("max-crypto-notional", l.max_crypto_notional_usd ?? 25);
+
+  setValue("sim-slippage", a.simulation_slippage_bps ?? 0);
+  setValue("sim-commission", a.simulation_commission_per_order ?? 0);
+  setValue("sim-settlement", a.simulation_settlement_days ?? 0);
+
   toggleSimConfigFields();
+  toggleAssetClassFields();
+  toggleSymbolSourceFields();
+  loadWatchlistOptions();
   setupBotIdField();
   configLoaded = true;
+}
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value == null ? "" : String(value);
+}
+
+function setChecked(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.checked = !!value;
+}
+
+function commaList(id) {
+  return (document.getElementById(id)?.value || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+async function loadWatchlistOptions() {
+  const datalist = document.getElementById("watchlist-options");
+  if (!datalist) return;
+  try {
+    const { watchlists } = await api("/api/watchlists");
+    datalist.innerHTML = (watchlists || [])
+      .map((w) => `<option value="${escapeHtml(w.name || w.id || "")}"></option>`)
+      .join("");
+  } catch {
+    /* watchlist suggestions are optional */
+  }
 }
 
 function setupBotIdField() {
@@ -625,6 +855,19 @@ async function saveBotConfig() {
       max_open_positions: +document.getElementById("max-positions").value,
       market_hours_only: document.getElementById("market-hours").checked,
       min_seconds_between_orders: +document.getElementById("min-gap").value,
+      symbol_source: document.getElementById("symbol-source")?.value || "static",
+      symbol_source_ref: document.getElementById("symbol-source-ref")?.value.trim() || null,
+      symbol_source_limit: +(document.getElementById("symbol-source-limit")?.value || 20),
+      options_enabled: document.getElementById("options-enabled")?.checked ?? false,
+      max_option_contracts: +(document.getElementById("max-option-contracts")?.value || 1),
+      max_option_notional_usd: +(document.getElementById("max-option-notional")?.value || 100),
+      allowed_option_types: commaList("allowed-option-types"),
+      min_days_to_expiry: +(document.getElementById("min-dte")?.value || 0),
+      max_days_to_expiry: +(document.getElementById("max-dte")?.value || 60),
+      allow_option_selling: document.getElementById("allow-option-selling")?.checked ?? false,
+      crypto_enabled: document.getElementById("crypto-enabled")?.checked ?? false,
+      allowed_crypto_pairs: commaList("allowed-crypto-pairs"),
+      max_crypto_notional_usd: +(document.getElementById("max-crypto-notional")?.value || 25),
     }),
   });
   const simCash = parseOptionalMoney(document.getElementById("sim-cash-start")?.value);
@@ -639,6 +882,11 @@ async function saveBotConfig() {
       simulation_include_live_portfolio:
         document.getElementById("sim-include-live")?.checked ?? false,
       max_runs: parseOptionalInt(document.getElementById("max-runs")?.value),
+      context_profile: document.getElementById("context-profile")?.value || "minimal",
+      scanners_enabled: document.getElementById("scanners-enabled")?.checked ?? true,
+      simulation_slippage_bps: +(document.getElementById("sim-slippage")?.value || 0),
+      simulation_commission_per_order: +(document.getElementById("sim-commission")?.value || 0),
+      simulation_settlement_days: +(document.getElementById("sim-settlement")?.value || 0),
   };
   await api(`${settingsBase}/app`, {
     method: "PUT",
