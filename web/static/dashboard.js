@@ -230,6 +230,7 @@ async function refreshBots() {
             <div class="small text-secondary">${escapeHtml(b.id)}</div>
           </div>
           <div class="d-flex flex-wrap gap-1 justify-content-end">
+            ${assetClassBadge(b.asset_class)}
             ${b.simulation_mode ? `<span class="badge text-bg-info">${escapeHtml(t("dashboard.badgeSim"))}</span>` : ""}
             <span class="badge ${schedulerBadgeClass(sched)}">${escapeHtml(schedulerStatusLabel(sched))}</span>
           </div>
@@ -276,15 +277,27 @@ async function botAction(botId, action) {
   refreshBots();
 }
 
+function assetClassBadge(assetClass) {
+  const key = String(assetClass || "equity");
+  const label = {
+    equity: t("dashboard.assetEquity"),
+    option: t("dashboard.assetOption"),
+    crypto: t("dashboard.assetCrypto"),
+  }[key] || key;
+  return `<span class="badge text-bg-secondary">${escapeHtml(label)}</span>`;
+}
+
 async function createBot() {
   const name = document.getElementById("new-bot-name").value.trim();
   if (!name) return toast(t("dashboard.createNameRequired"));
+  const assetClass = document.querySelector("input[name='new-bot-class']:checked")?.value || "equity";
   const { bot } = await api("/api/bots", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, asset_class: assetClass }),
   });
   bootstrap.Modal.getInstance(document.getElementById("addBotModal"))?.hide();
   document.getElementById("new-bot-name").value = "";
+  document.getElementById("new-bot-class-equity").checked = true;
   toast(t("dashboard.createSuccess", { name: bot.name }));
   refreshBots();
 }

@@ -1,13 +1,13 @@
 max_order_notional_usd: 250.0
 max_daily_loss_usd: 100.0
 allowed_symbols: []
-max_open_positions: 5
-market_hours_only: true
+max_open_positions: 4
+market_hours_only: false
 min_seconds_between_orders: 60
 symbol_source: popular_watchlist
-symbol_source_ref: Daily movers
+symbol_source_ref: Tradable crypto
 symbol_source_limit: 20
-asset_class: equity
+asset_class: crypto
 options_enabled: false
 max_option_contracts: 1
 max_option_notional_usd: 100.0
@@ -17,6 +17,6 @@ allowed_option_types:
 - call
 - put
 allow_option_selling: false
-crypto_enabled: false
+crypto_enabled: true
 allowed_crypto_pairs: []
-max_crypto_notional_usd: 25.0
+max_crypto_notional_usd: 250.0

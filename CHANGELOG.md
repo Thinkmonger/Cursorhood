@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Class-specific bot templates** — equities, options, and crypto each have their own `strategy.md`, limits, and cycle interval under `config/templates/`. The create-bot dialog picks a class instead of cloning the default bot.
+- **SQLite `bot_settings`** — strategy, limits, and per-bot app config persist in `data/bot.db`. Existing YAML is imported once; later edits write SQL only.
+- **OS keyring for API keys** — Cursor and Massive keys saved from the UI go to the `robinhood-agentic-bot` keyring (env / `.env` remain fallbacks). Secrets stay out of SQLite.
+- **Lightweight Charts on the bot console** — daily OHLC for a selected holding, plus an Open on TradingView link. Research already used the same library.
 - **Full Robinhood MCP catalog** — categorized registry in `src/trading/mcp_tools.py` covering all 79 live tools across account, watchlist, market-data, equity, option, crypto, scanner, and alert categories, with `asset_class_for_tool` and remote-merge for tools Robinhood ships later. Reconciled against a live `tools/list`, which turned up 22 tools absent from the support article: advanced orders, option exercise, alerts, news, analyst ratings, politician trades, SEC filings, index historicals, margin-upgrade info, and crypto onboarding.
 - **Per-bot tool filtering** — `ROBINHOOD_ENABLED_CATEGORIES` trims the proxy's `tools/list` to the bot's enabled asset classes; an equities-only bot sees 53 of 79 tools, cutting roughly 2,900 schema tokens (33%) from every cycle.
 - **Capabilities API and chips** — `GET /api/trading/capabilities` returns the live catalog grouped by category (5-minute cache); the dashboard shows which asset classes the connected account can trade.
@@ -35,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Differentiated default playbooks** — equity (session hours, Daily movers, SMA/RSI dip), option (long-only, DTE 21–45, Index options), and crypto (24/7, wider stops) no longer share one generic strategy.
 - **Exclusive asset class** — each bot trades equities, options, or crypto (not a mix). Watchlist items resolve by `list_id`, crypto bots read `currency_pair` entries (normalized to `BTC-USD`), an empty crypto pair list no longer blocks every pair, and mismatched order tools are denied before a paper fill.
 - **Cursor SDK integration** — dedicated `runner/cursor_agent.py` following Cursor production guidance: explicit local runtime and `api_key`, no ambient IDE settings, agent/run ID logging, startup vs mid-run error distinction, SDK bridge cleanup on shutdown.
 - **Prompt token optimization** — cycle prompts send minimal decision Context only (portfolio, holdings, quotes, 1h signals, last action, open orders); no order history dumps or raw bar arrays.

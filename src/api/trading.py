@@ -82,6 +82,29 @@ async def research_search(q: str, limit: int = 10) -> dict[str, Any]:
     return {"ok": True, "query": q, "results": await search_symbols(q, limit=limit)}
 
 
+@research_router.get("/charts/{symbol}")
+async def research_chart(symbol: str, interval: str = "1d") -> dict[str, Any]:
+    from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars
+    from src.trading.research import compact_ohlc_bars
+
+    ticker = str(symbol).strip().upper()
+    if not ticker:
+        return {"ok": False, "error": "No symbol given"}
+    if interval in ("1h", "hour", "hourly"):
+        payload = await fetch_hourly_bars([ticker])
+    else:
+        payload = await fetch_daily_bars([ticker], max_bars=90, yahoo_range="6mo")
+    entry = (payload.get("symbols") or {}).get(ticker) or {}
+    chart = compact_ohlc_bars(entry if isinstance(entry, dict) else {})
+    if not chart:
+        return {
+            "ok": False,
+            "symbol": ticker,
+            "error": entry.get("error") if isinstance(entry, dict) else "No bars",
+        }
+    return {"ok": True, "symbol": ticker, "interval": payload.get("interval"), **chart}
+
+
 @research_router.get("/{symbol}")
 async def research_symbol(symbol: str, financials: bool = True) -> dict[str, Any]:
     from src.trading.research import research_report

@@ -62,7 +62,7 @@ async def list_bots() -> dict[str, Any]:
 @router.post("")
 async def create_bot(body: CreateBotBody) -> dict[str, Any]:
     mgr = get_bot_manager()
-    bot = mgr.create_bot(body.name.strip())
+    bot = mgr.create_bot(body.name.strip(), body.asset_class)
     return {"bot": bot}
 
 

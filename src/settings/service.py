@@ -1,33 +1,71 @@
 from __future__ import annotations
 
-import os
+import json
 import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from src.auth.secrets import get_secret, set_secret
 from src.auth.tokens import TokenStore
-from src.db.migrate import DEFAULT_BOT_ID
-from src.paths import CONFIG_DIR, ENV_PATH
-from src.setup.mcp_client import use_cursor_mcp_mode
 from src.cursor_models import DEFAULT_API_MODEL
+from src.db.migrate import DEFAULT_BOT_ID
+from src.paths import CONFIG_DIR
+from src.setup.mcp_client import use_cursor_mcp_mode
 from src.settings.schema import AppConfig, BotAppConfig, LimitsConfig
 
-DEFAULT_STRATEGY = """# Strategy
+ASSET_CLASSES = ("equity", "option", "crypto")
+TEMPLATE_DIR = CONFIG_DIR / "templates"
 
-Monitor the symbols listed in your risk limits each cycle.
+DEFAULT_STRATEGY = """# Equities
 
-- Fetch portfolio, positions, and quotes before making any decision.
-- If no holdings, purchase $5 market value in **one** symbol per cycle (Robinhood blocks a second trade until investor profile is completed in the mobile app).
-- Buy and sell in reasonable increments, always aim for profit!
-- Only buy if RSI is low. Only sell if RSI is high.
-- If a watched symbol drops more than 2% from prior close, buy $5 notional (market).
-- Always dollar cost average where possible.
-- Do not add to a symbol if it already exceeds 25% of portfolio equity.
-- Rebalance toward equal weight when allocation drift exceeds 10%.
-- If no rule triggers, report "no action" and log the cycle summary.
+US cash equities only. Skip when the cash session is closed. Review `review_equity_order` before any place.
+
+- Each cycle: portfolio, positions, quotes, 1h technicals (open/close, SMA-20, RSI-14), last action. Uncertain → no action + `log_event`.
+- Entry (flat in the symbol): 1h close below SMA-20 and RSI(14) < 35, or a ≥2% dip from the 1d high. One new name per cycle.
+- Size: at most 20% of portfolio equity in any symbol; `max_order_notional_usd` is the hard cap. Max 5 names.
+- DCA once per symbol per cycle if mark is ≥5% below average cost (buy half the current position value).
+- Take profit at +4% vs average cost. Stop at −8%. Cancel working orders that survive a cycle.
+- Do not guess. If the tape and indicators disagree, skip.
 """
+
+
+def normalize_asset_class(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in ASSET_CLASSES else "equity"
+
+
+def load_class_template(asset_class: str) -> tuple[str, LimitsConfig, BotAppConfig]:
+    kind = normalize_asset_class(asset_class)
+    folder = TEMPLATE_DIR / kind
+    strategy = DEFAULT_STRATEGY
+    strategy_path = folder / "strategy.md"
+    if strategy_path.exists():
+        strategy = strategy_path.read_text(encoding="utf-8")
+    limits = LimitsConfig(
+        max_order_notional_usd=250,
+        max_daily_loss_usd=100,
+        max_open_positions=5,
+        market_hours_only=kind != "crypto",
+        min_seconds_between_orders=60,
+        asset_class=kind,  # type: ignore[arg-type]
+    )
+    limits_path = folder / "limits.yaml"
+    if limits_path.exists():
+        limits = LimitsConfig.model_validate(yaml.safe_load(limits_path.read_text(encoding="utf-8")) or {})
+    app = BotAppConfig(
+        cycle_interval_seconds=600 if kind == "option" else 300,
+        cursor_model=DEFAULT_API_MODEL,
+        auto_start_scheduler=False,
+        scheduler_enabled=True,
+        simulation_mode=True,
+        simulated_cash_starting_value=2500.0,
+    )
+    app_path = folder / "app.yaml"
+    if app_path.exists():
+        app = BotAppConfig.model_validate(yaml.safe_load(app_path.read_text(encoding="utf-8")) or {})
+    return strategy, limits, app
 
 
 class SettingsService:
@@ -37,7 +75,6 @@ class SettingsService:
             self.config_dir = CONFIG_DIR
         else:
             self.config_dir = CONFIG_DIR / "bots" / bot_id
-        self.config_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def strategy_path(self) -> Path:
@@ -62,84 +99,99 @@ class SettingsService:
     def global_app_path() -> Path:
         return CONFIG_DIR / "global.yaml"
 
-    def read_strategy(self) -> str:
-        if not self.strategy_path.exists():
-            if self.bot_id != DEFAULT_BOT_ID:
-                default = SettingsService(DEFAULT_BOT_ID)
-                if default.strategy_path.exists():
-                    self.write_strategy(default.read_strategy())
-                else:
-                    self.write_strategy(DEFAULT_STRATEGY)
-            else:
-                self.write_strategy(DEFAULT_STRATEGY)
-        return self.strategy_path.read_text(encoding="utf-8")
+    def _store(self):
+        from src.db.store import Store
 
-    def write_strategy(self, content: str) -> None:
-        self.strategy_path.write_text(content, encoding="utf-8")
+        return Store()
 
-    def read_limits(self) -> LimitsConfig:
+    def _row(self) -> dict[str, Any]:
+        self._ensure_settings()
+        row = self._store().get_bot_settings(self.bot_id)
+        if not row:
+            raise RuntimeError(f"Missing bot_settings for {self.bot_id}")
+        return row
+
+    def _persist(
+        self,
+        *,
+        strategy_md: str,
+        limits: LimitsConfig,
+        app: BotAppConfig,
+    ) -> None:
+        self._store().set_bot_settings(
+            self.bot_id,
+            asset_class=limits.asset_class,
+            strategy_md=strategy_md,
+            limits_json=json.dumps(limits.model_dump()),
+            app_json=json.dumps(app.model_dump()),
+        )
+
+    def _yaml_limits(self) -> LimitsConfig | None:
         if not self.limits_path.exists():
-            if self.bot_id != DEFAULT_BOT_ID:
-                default = SettingsService(DEFAULT_BOT_ID)
-                self.write_limits(default.read_limits())
-            else:
-                self.write_limits(
-                    LimitsConfig(
-                        max_order_notional_usd=100,
-                        max_daily_loss_usd=250,
-                        allowed_symbols=["AAPL", "MSFT"],
-                        max_open_positions=10,
-                        market_hours_only=True,
-                        min_seconds_between_orders=60,
-                    )
-                )
+            return None
         data = yaml.safe_load(self.limits_path.read_text(encoding="utf-8")) or {}
         return LimitsConfig.model_validate(data)
 
-    def write_limits(self, limits: LimitsConfig) -> None:
-        payload = limits.model_dump()
-        self.limits_path.write_text(
-            yaml.safe_dump(payload, default_flow_style=False, sort_keys=False),
-            encoding="utf-8",
-        )
-
-    def read_bot_app(self) -> BotAppConfig:
+    def _yaml_app(self) -> BotAppConfig | None:
         if not self.app_path.exists():
-            if self.bot_id != DEFAULT_BOT_ID:
-                default = SettingsService(DEFAULT_BOT_ID)
-                da = default.read_bot_app()
-                self.write_bot_app(da)
-            else:
-                self.write_bot_app(
-                    BotAppConfig(
-                        cycle_interval_seconds=120,
-                        cursor_model=DEFAULT_API_MODEL,
-                        auto_start_scheduler=False,
-                        scheduler_enabled=True,
-                        simulation_mode=True,
-                    )
-                )
+            return None
         data = yaml.safe_load(self.app_path.read_text(encoding="utf-8")) or {}
         if self.bot_id == DEFAULT_BOT_ID and "simulation_mode" not in data:
             data["simulation_mode"] = True
         return BotAppConfig.model_validate(data)
 
+    def _ensure_settings(self) -> None:
+        store = self._store()
+        if store.get_bot_settings(self.bot_id):
+            return
+        if store.get_bot(self.bot_id) is None:
+            return
+        strategy = None
+        if self.strategy_path.exists():
+            strategy = self.strategy_path.read_text(encoding="utf-8")
+        limits = self._yaml_limits()
+        app = self._yaml_app()
+        if strategy is None or limits is None or app is None:
+            inferred = limits.asset_class if limits else ("crypto" if self.bot_id == DEFAULT_BOT_ID else "equity")
+            t_strategy, t_limits, t_app = load_class_template(inferred)
+            strategy = strategy if strategy is not None else t_strategy
+            limits = limits or t_limits
+            app = app or t_app
+        self._persist(strategy_md=strategy, limits=limits, app=app)
+
+    def read_strategy(self) -> str:
+        return str(self._row()["strategy_md"])
+
+    def write_strategy(self, content: str) -> None:
+        row = self._row()
+        limits = LimitsConfig.model_validate(json.loads(row["limits_json"]))
+        app = BotAppConfig.model_validate(json.loads(row["app_json"]))
+        self._persist(strategy_md=content, limits=limits, app=app)
+
+    def read_limits(self) -> LimitsConfig:
+        return LimitsConfig.model_validate(json.loads(self._row()["limits_json"]))
+
+    def write_limits(self, limits: LimitsConfig) -> None:
+        row = self._row()
+        app = BotAppConfig.model_validate(json.loads(row["app_json"]))
+        self._persist(strategy_md=row["strategy_md"], limits=limits, app=app)
+
+    def read_bot_app(self) -> BotAppConfig:
+        return BotAppConfig.model_validate(json.loads(self._row()["app_json"]))
+
     def write_bot_app(self, app: BotAppConfig) -> None:
-        previous = self.read_bot_app() if self.app_path.exists() else None
-        payload = app.model_dump()
-        self.app_path.write_text(
-            yaml.safe_dump(payload, default_flow_style=False, sort_keys=False),
-            encoding="utf-8",
-        )
-        if previous and previous.simulated_cash_starting_value != app.simulated_cash_starting_value:
+        row = self._row()
+        previous = BotAppConfig.model_validate(json.loads(row["app_json"]))
+        limits = LimitsConfig.model_validate(json.loads(row["limits_json"]))
+        self._persist(strategy_md=row["strategy_md"], limits=limits, app=app)
+        if previous.simulated_cash_starting_value != app.simulated_cash_starting_value:
             from src.simulation.ledger import reset_ledger_for_starting_cash
 
             reset_ledger_for_starting_cash(self.bot_id)
         if app.max_runs is not None:
-            from src.db.store import Store
-
-            if Store().count_runs(self.bot_id) < app.max_runs:
-                Store().set_bot_state(self.bot_id, "scheduler_max_runs_reached", "false")
+            store = self._store()
+            if store.count_runs(self.bot_id) < app.max_runs:
+                store.set_bot_state(self.bot_id, "scheduler_max_runs_reached", "false")
 
     def read_global_dashboard(self) -> dict[str, Any]:
         global_path = self.global_app_path()
@@ -171,6 +223,19 @@ class SettingsService:
         gdata = self.read_global_dashboard()
         return AppConfig(**{**bot_app.model_dump(), **gdata})
 
+    def init_from_class(self, asset_class: str) -> None:
+        strategy, limits, app = load_class_template(asset_class)
+        if self._store().get_bot_settings(self.bot_id):
+            self._persist(strategy_md=strategy, limits=limits, app=app)
+            return
+        self._store().set_bot_settings(
+            self.bot_id,
+            asset_class=limits.asset_class,
+            strategy_md=strategy,
+            limits_json=json.dumps(limits.model_dump()),
+            app_json=json.dumps(app.model_dump()),
+        )
+
     def init_from_template(self, template_bot_id: str = DEFAULT_BOT_ID) -> None:
         src = SettingsService(template_bot_id)
         self.write_strategy(src.read_strategy())
@@ -198,45 +263,17 @@ class SettingsService:
             shutil.rmtree(new)
         shutil.move(str(old), str(new))
 
-    def _read_env_key(self, name: str) -> str | None:
-        value = os.environ.get(name)
-        if value:
-            return value.strip() or None
-        if ENV_PATH.exists():
-            prefix = f"{name}="
-            for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-                if line.startswith(prefix):
-                    stored = line.split("=", 1)[1].strip()
-                    return stored or None
-        return None
-
-    def _write_env_key(self, name: str, value: str) -> None:
-        lines: list[str] = []
-        if ENV_PATH.exists():
-            lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
-        prefix = f"{name}="
-        updated = False
-        for i, line in enumerate(lines):
-            if line.startswith(prefix):
-                lines[i] = f"{prefix}{value}"
-                updated = True
-                break
-        if not updated:
-            lines.append(f"{prefix}{value}")
-        ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.environ[name] = value
-
     def get_cursor_api_key(self) -> str | None:
-        return self._read_env_key("CURSOR_API_KEY")
+        return get_secret("CURSOR_API_KEY")
 
     def save_cursor_api_key(self, api_key: str) -> None:
-        self._write_env_key("CURSOR_API_KEY", api_key.strip())
+        set_secret("CURSOR_API_KEY", api_key)
 
     def get_massive_api_key(self) -> str | None:
-        return self._read_env_key("MASSIVE_API_KEY")
+        return get_secret("MASSIVE_API_KEY")
 
     def save_massive_api_key(self, api_key: str) -> None:
-        self._write_env_key("MASSIVE_API_KEY", api_key)
+        set_secret("MASSIVE_API_KEY", api_key)
 
     def mask_key(self, key: str | None) -> str | None:
         if not key:

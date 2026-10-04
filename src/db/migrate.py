@@ -89,6 +89,33 @@ def run_migrations(conn: sqlite3.Connection) -> None:
 
 
 RUN_NUMBER_MIGRATION_KEY = "migration_run_number_v1"
+BOT_SETTINGS_MIGRATION_KEY = "migration_bot_settings_v1"
+
+
+def migrate_bot_settings_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            bot_id TEXT PRIMARY KEY,
+            asset_class TEXT NOT NULL,
+            strategy_md TEXT NOT NULL,
+            limits_json TEXT NOT NULL,
+            app_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (bot_id) REFERENCES bots(id) ON DELETE CASCADE ON UPDATE CASCADE
+        )
+        """
+    )
+    if conn.execute(
+        "SELECT 1 FROM app_state WHERE key = ?", (BOT_SETTINGS_MIGRATION_KEY,)
+    ).fetchone():
+        return
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)
+        """,
+        (BOT_SETTINGS_MIGRATION_KEY, _utc_now()),
+    )
 
 
 def migrate_run_numbers(conn: sqlite3.Connection) -> None:

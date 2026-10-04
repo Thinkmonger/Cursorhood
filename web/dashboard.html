@@ -94,7 +94,22 @@
         <div class="modal-body">
           <label class="form-label" data-i18n="dashboard.botNameLabel">Bot name</label>
           <input id="new-bot-name" type="text" class="form-control" data-i18n-placeholder="dashboard.botNamePlaceholder" />
-          <p class="text-secondary small mt-2 mb-0" data-i18n="dashboard.cloneHint">Clones strategy and limits from the default bot.</p>
+          <label class="form-label mt-3" data-i18n="dashboard.assetClassLabel">Asset class</label>
+          <div class="d-flex flex-wrap gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="new-bot-class" id="new-bot-class-equity" value="equity" checked />
+              <label class="form-check-label" for="new-bot-class-equity" data-i18n="dashboard.assetEquity">Equities</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="new-bot-class" id="new-bot-class-option" value="option" />
+              <label class="form-check-label" for="new-bot-class-option" data-i18n="dashboard.assetOption">Options</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="new-bot-class" id="new-bot-class-crypto" value="crypto" />
+              <label class="form-check-label" for="new-bot-class-crypto" data-i18n="dashboard.assetCrypto">Crypto</label>
+            </div>
+          </div>
+          <p class="text-secondary small mt-2 mb-0" data-i18n="dashboard.classHint">Seeds a class-specific strategy and risk limits. You can edit them after create.</p>
         </div>
         <div class="modal-footer border-secondary">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal" data-i18n="common.cancel">Cancel</button>
@@ -113,6 +128,6 @@
   <script src="/static/i18n.js?v=20260529l"></script>
   <script src="/static/app.js?v=20261004a"></script>
   <script src="/static/footer.js?v=20260529l"></script>
-  <script src="/static/dashboard.js?v=20261004a"></script>
+  <script src="/static/dashboard.js?v=20261004b"></script>
 </body>
 </html>

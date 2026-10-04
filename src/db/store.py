@@ -6,7 +6,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from src.db.migrate import DEFAULT_BOT_ID, migrate_run_numbers, run_migrations
+from src.db.migrate import (
+    DEFAULT_BOT_ID,
+    migrate_bot_settings_table,
+    migrate_run_numbers,
+    run_migrations,
+)
 from src.db.schema import SCHEMA_SQL
 from src.paths import DB_PATH, ensure_data_dir
 
@@ -30,11 +35,13 @@ class Store:
             conn.executescript(SCHEMA_SQL)
             run_migrations(conn)
             migrate_run_numbers(conn)
+            migrate_bot_settings_table(conn)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
             conn.commit()
@@ -137,6 +144,7 @@ class Store:
                     "DELETE FROM agent_events WHERE run_id = ?", (run_id,)
                 )
             conn.execute("DELETE FROM agent_runs WHERE bot_id = ?", (bot_id,))
+            conn.execute("DELETE FROM bot_settings WHERE bot_id = ?", (bot_id,))
             conn.execute("DELETE FROM bots WHERE id = ?", (bot_id,))
             rows = conn.execute(
                 "SELECT key FROM app_state WHERE key LIKE ?",
@@ -174,6 +182,10 @@ class Store:
             conn.execute(
                 "UPDATE bots SET id = ?, updated_at = ? WHERE id = ?",
                 (new_id, now, old_id),
+            )
+            conn.execute(
+                "UPDATE bot_settings SET bot_id = ? WHERE bot_id = ?",
+                (new_id, old_id),
             )
             rows = conn.execute(
                 "SELECT key, value FROM app_state WHERE key LIKE ?",
@@ -410,3 +422,50 @@ class Store:
                 (utc_now(),),
             )
             return int(cur.rowcount)
+
+    def get_bot_settings(self, bot_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM bot_settings WHERE bot_id = ?",
+                (bot_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def set_bot_settings(
+        self,
+        bot_id: str,
+        *,
+        asset_class: str,
+        strategy_md: str,
+        limits_json: str,
+        app_json: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO bot_settings
+                    (bot_id, asset_class, strategy_md, limits_json, app_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(bot_id) DO UPDATE SET
+                    asset_class = excluded.asset_class,
+                    strategy_md = excluded.strategy_md,
+                    limits_json = excluded.limits_json,
+                    app_json = excluded.app_json,
+                    updated_at = excluded.updated_at
+                """,
+                (bot_id, asset_class, strategy_md, limits_json, app_json, utc_now()),
+            )
+
+    def update_bot_settings(self, bot_id: str, **fields: str) -> None:
+        allowed = {"asset_class", "strategy_md", "limits_json", "app_json"}
+        updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        if not updates:
+            return
+        assignments = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values())
+        values.extend([utc_now(), bot_id])
+        with self.connect() as conn:
+            conn.execute(
+                f"UPDATE bot_settings SET {assignments}, updated_at = ? WHERE bot_id = ?",
+                values,
+            )

@@ -240,6 +240,8 @@ class CreateBotBody(BaseModel):
 
     name: str = Field(min_length=1, max_length=80)
 
+    asset_class: Literal["equity", "option", "crypto"] = "equity"
+
 
 
 

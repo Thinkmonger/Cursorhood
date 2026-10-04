@@ -67,9 +67,12 @@ class BotManager:
         next_run = sched.next_scheduled_run_at
         from src.settings.service import SettingsService
 
+        settings = SettingsService(bot_id)
+        limits = settings.read_limits()
         return {
             **self.store.get_bot(bot_id),  # type: ignore[arg-type]
-            "simulation_mode": SettingsService(bot_id).read_bot_app().simulation_mode,
+            "asset_class": limits.asset_class,
+            "simulation_mode": settings.read_bot_app().simulation_mode,
             "scheduler": {
                 "started": started,
                 "paused": paused,
@@ -83,12 +86,12 @@ class BotManager:
             "stats": stats,
         }
 
-    def create_bot(self, name: str) -> dict[str, Any]:
+    def create_bot(self, name: str, asset_class: str = "equity") -> dict[str, Any]:
         existing = {b["id"] for b in self.store.list_bots()}
         bot_id = slugify(name, existing=existing)
         bot = self.store.create_bot(bot_id, name.strip())
         settings = SettingsService(bot_id)
-        settings.init_from_template(DEFAULT_BOT_ID)
+        settings.init_from_class(asset_class)
         from runner.scheduler import Scheduler
 
         self._schedulers[bot_id] = Scheduler(bot_id)

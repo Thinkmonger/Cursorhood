@@ -28,6 +28,7 @@
       <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> <span data-i18n="nav.backToDashboard">Dashboard</span></a>
       <h1 id="bot-title" class="h4 mb-0" data-i18n="bot.titleDefault">Bot</h1>
       <span id="bot-sched-badge" class="badge text-bg-secondary" data-i18n="common.emDash">—</span>
+      <span id="bot-class-badge" class="badge text-bg-secondary d-none"></span>
       <span id="bot-sim-badge" class="badge text-bg-info d-none" data-i18n="bot.badgeSimulation">Simulation</span>
     </div>
 
@@ -47,6 +48,19 @@
         <div id="sim-kpis-block" class="d-none">
           <div class="small text-info fw-semibold mb-1" data-i18n="portfolio.simPortfolioLabel">Simulated portfolio</div>
           <div class="row g-3 mb-3" id="portfolio-kpis-sim"></div>
+        </div>
+
+        <div class="rh-card mb-3">
+          <div class="rh-card-head d-flex justify-content-between align-items-center gap-2">
+            <span><i class="bi bi-graph-up me-1"></i> <span data-i18n="portfolio.priceHistory">Price history</span></span>
+            <div class="d-flex align-items-center gap-2">
+              <select id="price-chart-symbol" class="form-select form-select-sm" style="width: auto; min-width: 8rem;"></select>
+              <a id="bot-tv-link" class="small" target="_blank" rel="noopener noreferrer" hidden></a>
+            </div>
+          </div>
+          <div class="p-3">
+            <div id="bot-price-chart" class="price-chart"></div>
+          </div>
         </div>
 
         <div class="row g-3 mb-3">
@@ -411,7 +425,7 @@
           <div class="row g-3">
             <div class="col-md-4">
               <label class="form-label" for="symbol-source" data-i18n="symbolSource.sourceLabel">Source</label>
-              <select id="symbol-source" class="form-select form-select-sm" onchange="toggleSymbolSourceFields()">
+              <select id="symbol-source" class="form-select form-select-sm" onchange="toggleSymbolSourceFields(); loadWatchlistOptions();">
                 <option value="static" data-i18n="symbolSource.optStatic">Static list</option>
                 <option value="watchlist" data-i18n="symbolSource.optWatchlist">My watchlist</option>
                 <option value="popular_watchlist" data-i18n="symbolSource.optPopular">Robinhood popular list</option>
@@ -420,8 +434,7 @@
             </div>
             <div class="col-md-5" id="symbol-source-ref-block">
               <label class="form-label" for="symbol-source-ref" data-i18n="symbolSource.refLabel">Watchlist / scan</label>
-              <input id="symbol-source-ref" class="form-control form-control-sm" list="watchlist-options" />
-              <datalist id="watchlist-options"></datalist>
+              <select id="symbol-source-ref" class="form-select form-select-sm"></select>
             </div>
             <div class="col-md-3">
               <label class="form-label" for="symbol-source-limit" data-i18n="symbolSource.limitLabel">Max symbols / cycle</label>
@@ -535,9 +548,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="/static/i18n.js?v=20260529l"></script>
   <script src="/static/app.js?v=20261004a"></script>
   <script src="/static/footer.js?v=20260529l"></script>
-  <script src="/static/bot-dashboard.js?v=20261004a"></script>
+  <script src="/static/bot-dashboard.js?v=20261004c"></script>
 </body>
 </html>

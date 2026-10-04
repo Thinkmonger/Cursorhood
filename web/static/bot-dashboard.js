@@ -5,6 +5,8 @@ let started = false;
 let configLoaded = false;
 let portfolioSparkline = null;
 let portfolioRequestSeq = 0;
+let priceChart = null;
+let priceChartBound = false;
 
 const debouncedRefresh = debounce(() => {
   refresh();
@@ -50,7 +52,6 @@ function toggleAssetClassFields() {
 function toggleSymbolSourceFields() {
   const source = document.getElementById("symbol-source")?.value || "static";
   document.getElementById("symbol-source-ref-block")?.classList.toggle("d-none", source === "static");
-  loadWatchlistOptions();
 }
 
 function parseOptionalInt(value) {
@@ -189,6 +190,110 @@ function holdingsRowsHtml(holdings) {
     .join("");
 }
 
+function tradingViewSymbol(symbol) {
+  return String(symbol || "").toUpperCase().replace(/-/g, "");
+}
+
+function collectChartSymbols(...groups) {
+  const seen = new Set();
+  const out = [];
+  for (const group of groups) {
+    for (const row of group || []) {
+      const symbol = String(row.symbol || row.pair || "").trim().toUpperCase();
+      if (symbol && !seen.has(symbol)) {
+        seen.add(symbol);
+        out.push(symbol);
+      }
+    }
+  }
+  return out;
+}
+
+function bindPriceChartSelect() {
+  if (priceChartBound) return;
+  const sel = document.getElementById("price-chart-symbol");
+  if (!sel) return;
+  sel.addEventListener("change", () => loadBotPriceChart(sel.value));
+  priceChartBound = true;
+}
+
+function syncPriceChartSymbols(symbols) {
+  const sel = document.getElementById("price-chart-symbol");
+  const el = document.getElementById("bot-price-chart");
+  bindPriceChartSelect();
+  if (!sel || !el) return;
+  if (!symbols.length) {
+    sel.innerHTML = "";
+    if (priceChart) {
+      priceChart.remove();
+      priceChart = null;
+    }
+    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
+    const link = document.getElementById("bot-tv-link");
+    if (link) link.hidden = true;
+    return;
+  }
+  const previous = sel.value;
+  sel.innerHTML = symbols
+    .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)
+    .join("");
+  const next = symbols.includes(previous) ? previous : symbols[0];
+  sel.value = next;
+  loadBotPriceChart(next);
+}
+
+async function loadBotPriceChart(symbol) {
+  const el = document.getElementById("bot-price-chart");
+  const link = document.getElementById("bot-tv-link");
+  if (!el || !symbol) return;
+  if (link) {
+    const tv = tradingViewSymbol(symbol);
+    link.href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}`;
+    link.textContent = t("portfolio.openTradingView");
+    link.hidden = false;
+  }
+  try {
+    const report = await api(`/api/research/charts/${encodeURIComponent(symbol)}`);
+    const bars = report.bars || [];
+    if (!bars.length || typeof LightweightCharts === "undefined") {
+      el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
+      if (priceChart) {
+        priceChart.remove();
+        priceChart = null;
+      }
+      return;
+    }
+    el.innerHTML = "";
+    if (priceChart) {
+      priceChart.remove();
+      priceChart = null;
+    }
+    priceChart = LightweightCharts.createChart(el, {
+      layout: { background: { color: "transparent" }, textColor: "#8b9cb3" },
+      grid: {
+        vertLines: { color: "rgba(255,255,255,0.06)" },
+        horzLines: { color: "rgba(255,255,255,0.06)" },
+      },
+      rightPriceScale: { borderColor: "#2d3a4d" },
+      timeScale: { borderColor: "#2d3a4d", timeVisible: false },
+      width: el.clientWidth || el.parentElement?.clientWidth || 640,
+      height: 280,
+    });
+    const series = priceChart.addCandlestickSeries({
+      upColor: "#00c805",
+      downColor: "#ff5a5f",
+      borderUpColor: "#00c805",
+      borderDownColor: "#ff5a5f",
+      wickUpColor: "#00c805",
+      wickDownColor: "#ff5a5f",
+    });
+    series.setData(bars);
+    priceChart.timeScale().fitContent();
+  } catch (err) {
+    el.innerHTML = `<p class="text-danger small mb-0">${escapeHtml(String(err.message || err))}</p>`;
+  }
+}
+
 function renderHoldingsBlock(holdings, tbodyId, emptyId, wrapId) {
   const tbody = document.getElementById(tbodyId);
   const empty = document.getElementById(emptyId);
@@ -295,6 +400,7 @@ function renderPortfolioOverview(overview) {
     }
 
     renderHoldingsBlock(liveHoldings, "holdings-body", "holdings-empty", "holdings-wrap");
+    syncPriceChartSymbols(collectChartSymbols(liveHoldings, simulation?.holdings || []));
 
     const simHoldingsSection = document.getElementById("sim-holdings-section");
     if (simMode && simulation) {
@@ -428,6 +534,17 @@ async function refresh() {
     const simBadge = document.getElementById("bot-sim-badge");
     if (simBadge) {
       simBadge.classList.toggle("d-none", !app.simulation_mode);
+    }
+    const classBadge = document.getElementById("bot-class-badge");
+    if (classBadge) {
+      const ac = (d.limits && d.limits.asset_class) || "equity";
+      const labels = {
+        equity: t("dashboard.assetEquity"),
+        option: t("dashboard.assetOption"),
+        crypto: t("dashboard.assetCrypto"),
+      };
+      classBadge.textContent = labels[ac] || ac;
+      classBadge.classList.remove("d-none");
     }
 
     const schedLine = document.getElementById("scheduler-status");
@@ -767,7 +884,6 @@ async function loadBotConfig() {
   if (maxRunsEl) maxRunsEl.value = a.max_runs != null ? String(a.max_runs) : "";
 
   setValue("symbol-source", l.symbol_source || "static");
-  setValue("symbol-source-ref", l.symbol_source_ref || "");
   setValue("symbol-source-limit", l.symbol_source_limit ?? 20);
   setValue("context-profile", a.context_profile || "minimal");
   setChecked("scanners-enabled", a.scanners_enabled !== false);
@@ -792,7 +908,7 @@ async function loadBotConfig() {
   toggleSimConfigFields();
   toggleAssetClassFields();
   toggleSymbolSourceFields();
-  loadWatchlistOptions();
+  loadWatchlistOptions(l.symbol_source_ref || "");
   setupBotIdField();
   configLoaded = true;
 }
@@ -814,9 +930,10 @@ function commaList(id) {
     .filter(Boolean);
 }
 
-async function loadWatchlistOptions() {
-  const datalist = document.getElementById("watchlist-options");
-  if (!datalist) return;
+async function loadWatchlistOptions(selected) {
+  const select = document.getElementById("symbol-source-ref");
+  if (!select) return;
+  const current = selected ?? select.value ?? "";
   try {
     const [{ watchlists }, popular, scansRes] = await Promise.all([
       api("/api/watchlists"),
@@ -830,17 +947,35 @@ async function loadWatchlistOptions() {
         : source === "popular_watchlist"
           ? popular.watchlists || []
           : watchlists || [];
-    const names = new Set();
-    const options = [];
-    for (const w of rows) {
-      const name = w.name || w.id || "";
-      if (!name || names.has(name)) continue;
-      names.add(name);
-      options.push(`<option value="${escapeHtml(name)}"></option>`);
+    const seen = new Set();
+    const options = [
+      `<option value="">${escapeHtml(t("symbolSource.refPlaceholder"))}</option>`,
+    ];
+    let matched = "";
+    for (const row of rows) {
+      const name = String(row.name || "").trim();
+      const id = String(row.id || "").trim();
+      const value = source === "scan" ? id || name : name || id;
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      const label = name && id && name !== id ? `${name}` : name || id;
+      options.push(`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`);
+      if (!matched && current && (value === current || name === current || id === current)) {
+        matched = value;
+      }
     }
-    datalist.innerHTML = options.join("");
+    if (current && !matched) {
+      options.push(`<option value="${escapeHtml(current)}">${escapeHtml(current)}</option>`);
+      matched = current;
+    }
+    select.innerHTML = options.join("");
+    select.value = matched;
   } catch {
-    /* watchlist suggestions are optional */
+    select.innerHTML = `<option value="">${escapeHtml(t("symbolSource.refPlaceholder"))}</option>`;
+    if (current) {
+      select.innerHTML += `<option value="${escapeHtml(current)}">${escapeHtml(current)}</option>`;
+      select.value = current;
+    }
   }
 }
 

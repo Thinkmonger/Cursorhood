@@ -83,7 +83,7 @@ The console has no login: it trusts whoever can reach the port. Bind to loopback
 - **Origin pinning** rejects cross-site `POST`s that would start, pause, or reset a bot (CSRF).
 - **Host pinning** rejects DNS-rebinding `Host` headers so a hijacked hostname cannot read settings.
 - Responses include `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy`. HTML stays `no-cache`; `/static` and `/locales` cache for a day (assets are already cache-busted with `?v=`).
-- Settings APIs return masked keys (`cursor_api_key_masked`), never the raw secret.
+- Settings APIs return masked keys (`cursor_api_key_masked`), never the raw secret. Cursor and Massive keys are stored in the OS keyring (service `robinhood-agentic-bot`); process env still wins for CI. Keys are not written to SQLite.
 - WebSocket `/ws` accepts only the same origin set as HTTP writes.
 
 To expose the dashboard beyond loopback, set `DASHBOARD_ALLOWED_HOSTS` and `DASHBOARD_ALLOWED_ORIGINS`. Do not put this process on the public internet.
@@ -159,18 +159,18 @@ On some Windows setups, Python cannot verify Robinhood’s TLS certificate chain
 
 ## Bots, risk, and paper trading
 
-Each bot has its own strategy, limits, and scheduler. The **default** bot uses the top-level `config/` folder; additional bots use `config/bots/{bot_id}/`. New bots clone strategy and limits from default. Edit them from the bot’s **Configuration** tab.
+Each bot has its own strategy, limits, and scheduler. Creating a bot picks **Equities**, **Options**, or **Crypto** and seeds a class-specific playbook from `config/templates/`. Runtime copies live in SQLite (`bot_settings`); the YAML files are seed templates and a one-time import for existing bots. Edit strategy and limits from the bot’s **Configuration** tab.
 
 | Path | Purpose |
 |------|---------|
-| `config/strategy.md` | Default bot strategy |
-| `config/limits.yaml` | Default bot risk limits |
-| `config/app.yaml` | Default bot scheduler and simulation settings |
+| `config/templates/{equity,option,crypto}/` | Class seed strategy, limits, and app settings |
+| `config/strategy.md` | Default bot seed (imported into SQLite on first read) |
+| `config/limits.yaml` | Default bot seed limits |
+| `config/app.yaml` | Default bot seed scheduler and simulation settings |
 | `config/global.yaml` | Shared dashboard host/port (optional; created on save) |
-| `config/bots/{id}/strategy.md` | Per-bot strategy |
-| `config/bots/{id}/limits.yaml` | Per-bot risk limits |
-| `config/bots/{id}/app.yaml` | Per-bot scheduler and simulation settings |
-| `.env` | API keys and environment overrides |
+| `config/bots/{id}/` | Example / leftover YAML (imported once if no SQL row) |
+| `data/bot.db` | Bots, `bot_settings`, runs, events, paper ledger |
+| `.env` | Optional API-key fallback; UI saves go to the OS keyring |
 | `AGENTS.md` | Agent playbook (reference; cycle prompts use Context JSON) |
 
 Useful limits (see the bot page for the full form):
