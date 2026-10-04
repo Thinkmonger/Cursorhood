@@ -62,6 +62,12 @@ def resolve_price(symbol: str, asset_class: str, quotes_payload: Any | None) -> 
             return price
         return _fetch_sync(_fetch_equity, ticker)
     if asset_class == CRYPTO:
+        price = equity_price(quotes_payload, ticker)
+        if price is not None:
+            return price
+        price = _first_price(quotes_payload, ticker)
+        if price is not None:
+            return price
         return _fetch_sync(_fetch_crypto, ticker)
     if asset_class == OPTION:
         return _fetch_sync(_fetch_option, ticker)

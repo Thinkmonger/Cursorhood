@@ -125,7 +125,10 @@ def simulate_order(tool_name: str, args: dict, asset_class: str, limits: dict) -
             order_type=args.get("type") or args.get("order_type") or "market",
             qty=_optional_float(args.get("quantity") or args.get("contracts")),
             notional=_optional_float(
-                args.get("notional") or args.get("amount") or args.get("amount_usd")
+                args.get("dollar_amount")
+                or args.get("notional")
+                or args.get("amount")
+                or args.get("amount_usd")
             ),
             limit_price=_optional_float(args.get("limit_price") or args.get("price")),
             stop_price=_optional_float(args.get("stop_price")),

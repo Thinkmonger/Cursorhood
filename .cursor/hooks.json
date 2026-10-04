@@ -4,7 +4,7 @@
     "beforeMCPExecution": [
       {
         "command": "python .cursor/hooks/check_trade.py",
-        "matcher": "place_equity_order|cancel_equity_order",
+        "matcher": "place_equity_order|cancel_equity_order|place_crypto_order|cancel_crypto_order|place_option_order|cancel_option_order|place_advanced_order|cancel_advanced_order",
         "failClosed": true
       }
     ]

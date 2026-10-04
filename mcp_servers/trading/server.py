@@ -32,11 +32,13 @@ def _enabled_categories() -> set[str] | None:
 
 
 def _tool_from_remote(raw: dict[str, Any]) -> types.Tool:
+    # Robinhood declares outputSchema but returns text-only content. Passing
+    # outputSchema through makes Cursor treat error strings as schema failures.
     return types.Tool(
         name=raw["name"],
         description=raw.get("description") or "",
         inputSchema=raw.get("inputSchema") or {"type": "object", "properties": {}},
-        outputSchema=raw.get("outputSchema"),
+        outputSchema=None,
     )
 
 
@@ -54,6 +56,27 @@ async def _remote_tools(client: MCPClient) -> list[types.Tool]:
             continue
         out.append(_tool_from_remote(tool))
     return out
+
+
+def _extract_api_error(text: str) -> str | None:
+    """Turn `API error 400: {"non_field_errors":[...]}` into a readable message."""
+    if "API error" not in text:
+        return None
+    brace = text.find("{")
+    if brace >= 0:
+        try:
+            body = json.loads(text[brace:])
+        except json.JSONDecodeError:
+            return text
+        if isinstance(body, dict):
+            for key in ("non_field_errors", "errors", "detail", "message"):
+                value = body.get(key)
+                if isinstance(value, list) and value:
+                    return str(value[0])
+                if isinstance(value, str) and value:
+                    return value
+            return json.dumps(body)
+    return text
 
 
 def _normalize_tool_result(parsed: Any) -> dict[str, Any] | types.CallToolResult:
@@ -75,6 +98,12 @@ def _normalize_tool_result(parsed: Any) -> dict[str, Any] | types.CallToolResult
     if isinstance(parsed, dict):
         return parsed
     if isinstance(parsed, str):
+        extracted = _extract_api_error(parsed)
+        if extracted:
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=extracted)],
+                isError=True,
+            )
         try:
             return json.loads(parsed)
         except json.JSONDecodeError:
@@ -139,6 +168,120 @@ server = Server("robinhood-trading")
 _tool_cache: list[types.Tool] | None = None
 
 
+def _to_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _proxy_bot_id() -> str:
+    from src.db.migrate import DEFAULT_BOT_ID
+
+    return os.environ.get("ROBINHOOD_BOT_ID") or DEFAULT_BOT_ID
+
+
+def _proxy_run_id() -> int | None:
+    raw = os.environ.get("ROBINHOOD_RUN_ID")
+    try:
+        return int(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _snapshot_quotes(run_id: int | None) -> Any:
+    if run_id is None:
+        return None
+    from src.db.store import Store
+
+    for ev in Store().get_events(run_id):
+        if ev.get("type") == "portfolio_snapshot":
+            return (ev.get("payload") or {}).get("quotes")
+    return None
+
+
+def _simulate_tool(name: str, args: dict[str, Any]) -> dict[str, Any] | types.CallToolResult | None:
+    """Fill paper orders locally so simulation never hits live Robinhood."""
+    from src.simulation.ledger import OrderIntent, cancel_paper_orders, is_simulation_mode, submit_paper_order
+    from src.trading.mcp_tools import REVIEW_TOOLS, asset_class_for_tool, is_order_write_tool
+
+    bot_id = _proxy_bot_id()
+    try:
+        if not is_simulation_mode(bot_id):
+            return None
+    except Exception:
+        return None
+    if name in REVIEW_TOOLS:
+        return {
+            "ok": True,
+            "simulation": True,
+            "message": "Paper trading — preview only; placing will fill against the paper ledger.",
+            "symbol": args.get("symbol"),
+            "side": args.get("side"),
+            "type": args.get("type"),
+            "dollar_amount": args.get("dollar_amount"),
+            "quantity": args.get("quantity"),
+        }
+    if not is_order_write_tool(name):
+        return None
+
+    asset_class = asset_class_for_tool(name)
+    if "exercise" in name.lower():
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text="Simulation mode — option exercise is not modeled by the paper broker.")],
+            isError=True,
+        )
+
+    if asset_class == "crypto":
+        from src.trading.crypto import normalize_pair
+
+        symbol = normalize_pair(args.get("symbol") or args.get("pair") or args.get("currency_pair") or "")
+    else:
+        symbol = str(
+            args.get("symbol")
+            or args.get("chain_symbol")
+            or args.get("underlying")
+            or ""
+        ).upper()
+
+    run_id = _proxy_run_id()
+    if "cancel_" in name.lower():
+        cancelled = cancel_paper_orders(bot_id, order_id=args.get("order_id"), symbol=symbol or None)
+        return {"ok": True, "simulation": True, "cancelled": len(cancelled)}
+
+    intent = OrderIntent(
+        symbol=symbol,
+        side=str(args.get("side") or "buy").lower(),
+        asset_class=asset_class if asset_class != "none" else "equity",
+        order_type=str(args.get("type") or args.get("order_type") or "market"),
+        qty=_to_float(args.get("quantity") or args.get("contracts")),
+        notional=_to_float(
+            args.get("dollar_amount")
+            or args.get("notional")
+            or args.get("amount")
+            or args.get("amount_usd")
+        ),
+        limit_price=_to_float(args.get("limit_price") or args.get("price")),
+        stop_price=_to_float(args.get("stop_price")),
+        intent_key=f"proxy:{run_id}:{symbol}:{args.get('side')}:{name}",
+        run_id=run_id,
+    )
+    if intent.qty is None and intent.notional is None:
+        from src.settings.service import SettingsService
+
+        intent.notional = float(SettingsService(bot_id).read_limits().max_order_notional_usd or 0)
+    quotes = _snapshot_quotes(run_id)
+    result = submit_paper_order(bot_id, intent, quotes)
+    if not result.get("ok"):
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=f"Simulation mode — paper order rejected: {result.get('reason')}")],
+            isError=True,
+        )
+    return {"ok": True, "simulation": True, "paper": True, **{k: result[k] for k in ("status", "order", "duplicate") if k in result}}
+
+
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
     global _tool_cache
@@ -156,6 +299,9 @@ async def call_tool(name: str, arguments: dict[str, Any] | None) -> dict[str, An
     if not token:
         raise ValueError("ROBINHOOD_MCP_TOKEN not set for robinhood-trading proxy")
     args = arguments or {}
+    simulated = _simulate_tool(name, args)
+    if simulated is not None:
+        return simulated
     client = MCPClient(token=token)
     result = await client.call_tool(name, args)
     parsed = extract_mcp_data(result)

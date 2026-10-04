@@ -74,6 +74,8 @@ def build_agent_mcp_servers(
             env=_mcp_subprocess_env(
                 {
                     "ROBINHOOD_MCP_TOKEN": token,
+                    "ROBINHOOD_BOT_ID": bot_id,
+                    "ROBINHOOD_RUN_ID": str(run_id),
                     "ROBINHOOD_ENABLED_CATEGORIES": ",".join(sorted(_bot_categories(bot_id))),
                 }
             ),
