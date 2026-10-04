@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "robinhood-trading": {
+      "command": "python",
+      "args": ["-m", "mcp_servers.trading.server"],
+      "env": {
+        "ROBINHOOD_MCP_TOKEN": "",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    "robinhood-status": {
+      "command": "python",
+      "args": ["-m", "mcp_servers.status.server"]
+    }
+  }
+}

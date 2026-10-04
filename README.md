@@ -234,6 +234,10 @@ This console is free and local. Two easy ways to help if it is useful:
 
 Neither is required to run the software.
 
+## License
+
+This project is released under the [MIT License](LICENSE).
+
 ## Disclosures
 
 You are responsible for all trades. Agentic trading involves significant risk of loss, including the entire balance of the Agentic account. This software is not affiliated with, endorsed by, or a product of Robinhood. Brokerage services through Robinhood Financial LLC (member SIPC). Referral rewards are offered by Robinhood, not by this project; see Robinhood’s terms on the signup page. Tips via Venmo are voluntary and do not purchase support, trading advice, or any security.

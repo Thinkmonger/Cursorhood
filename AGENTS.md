@@ -34,4 +34,4 @@ This is a Python 3.11+ FastAPI web console (the "Robinhood Agentic Console"). Th
 - **Core functionality without external keys**: creating bots, seeding/resetting the simulation ledger (default `$500` cash), portfolio/statistics views, and the dashboard UI all work with no Robinhood/Cursor/Massive credentials. Use these for smoke testing.
 - **State/DB**: a SQLite DB is created at `data/bot.db` on first run (the `data/` dir is gitignored). Delete it to reset all bots/runs.
 - **Harmless startup noise**: `python -m runner.main` may auto-open a browser (`open_browser_on_start`), producing `dbus`/`GCM`/`gpu` Chrome errors in the log. These are unrelated to the server, which is healthy once you see `Uvicorn running on http://127.0.0.1:8765`.
-- **`.cursor/mcp.json`** contains Windows paths and a sample token; it is only used when running real Robinhood MCP trading and is not needed to start the dashboard.
+- **`.cursor/mcp.json`** is local (gitignored). Copy `.cursor/mcp.json.example` if you need Cursor IDE MCP; it is not required to start the dashboard.
