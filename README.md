@@ -2,13 +2,15 @@
 
 Local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading). It runs [Cursor](https://cursor.com) agents against the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`, with a dashboard, risk limits, paper trading, and optional extra market data.
 
+Cursor’s multi-agent setup is the point: you can run several bots at once and give each the model that matches how you want it to trade — a fast Composer cycle for dip-buys, a heavier Claude or GPT model for options or research, Auto when you want included plan usage. One key, many specialists.
+
 You keep the process on your machine. The agents trade only in your **Agentic account** (separate from your main Robinhood portfolio), and only after the local risk hook allows the order.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## What you can do
 
-- Run **multiple strategy bots** with their own markdown strategy, risk limits, schedule, and Cursor model.
+- Run **multiple strategy bots** side by side, each with its own markdown strategy, risk limits, schedule, and **Cursor model** — pick the model that fits that bot’s pace and asset class.
 - Start in **simulation mode** — paper fills against a multi-asset ledger (equities, options, crypto) with FIFO realized P&L, resting limit/stop orders, and optional T+N settlement. Turn simulation off only when you are ready for live Agentic trades.
 - Trade from a **static symbol list**, one of your Robinhood **watchlists**, a popular list, or a saved **scan**.
 - Pick **one asset class per bot** — equities, single-leg options, or crypto. Crypto bots keep cycling 24/7 instead of sleeping at the equity close.
@@ -112,17 +114,23 @@ Configure shared credentials on **Configuration** (`/?tab=config`):
 | **Massive API key** | Optional fallback for 1-hour bars |
 | **Robinhood** | OAuth to your Agentic account |
 
-### Cursor API billing
+### Cursor models (multi-agent)
 
-Cycles use the **Cursor SDK with your API key**. Most models bill **API usage** (SDK tag) on your Cursor dashboard.
+Each bot is its own Cursor agent. That is how you mix styles without forcing one model onto every strategy:
 
-- Default model is **`composer-2.5`** (change per bot under **Cursor model**).
-- **Auto, Composer, and Cursor Grok** use included Cursor/IDE usage. Third-party models bill at the provider's API rate.
+| Fit | Typical choice | Why |
+|-----|----------------|-----|
+| Frequent equity or crypto cycles | **Composer** (`composer-2.5`) or **Auto** | Fast, cheap enough to run every few minutes; draws included Cursor/IDE usage |
+| Options, research-heavy prompts, or “read more before you trade” | **Claude, GPT, Gemini**, or another API model | Stronger reasoning on chains, news, and messy context; billed at the provider rate |
+| A second opinion | A different model on a second bot | Same watchlist, different brain — compare fills in simulation before you go live |
+
+The bot **Cursor model** dropdown lists every model your key can use, grouped into **IDE / Cursor models** (Auto, Composer, Cursor Grok) and **API (third-party)**. Change it per bot on **Configuration**; `GET /api/settings/cursor/models` returns the same catalog. Default is **`composer-2.5`**.
+
+Cycles use the **Cursor SDK with your API key**. Most third-party models bill **API usage** (SDK tag) on your Cursor dashboard. Auto, Composer, and Cursor Grok use included plan usage.
+
 - The SDK runs **locally** with explicit `local` runtime, inline MCP config, and no IDE project settings.
 - Each cycle uses `Agent.create` + `agent.send` with streaming and proper SDK disposal on shutdown.
 - `agent_id` and `cursor_run_id` show up in the activity timeline for debugging in the Cursor console.
-
-The bot **Cursor model** dropdown lists every model available to your key, grouped into **IDE / Cursor models** (Auto, Composer, Cursor Grok — included plan usage) and **API (third-party)** (Claude, GPT, Gemini, and others billed at the provider rate). `GET /api/settings/cursor/models` returns the same catalog.
 
 ### Market data
 

@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **README / GitHub about** — explain Cursor multi-agent model choice (Composer for fast cycles, API models for heavier options/research).
 - **Differentiated default playbooks** — equity (session hours, Daily movers, SMA/RSI dip), option (long-only, DTE 21–45, Index options), and crypto (24/7, wider stops) no longer share one generic strategy.
 - **Exclusive asset class** — each bot trades equities, options, or crypto (not a mix). Watchlist items resolve by `list_id`, crypto bots read `currency_pair` entries (normalized to `BTC-USD`), an empty crypto pair list no longer blocks every pair, and mismatched order tools are denied before a paper fill.
 - **Cursor SDK integration** — dedicated `runner/cursor_agent.py` following Cursor production guidance: explicit local runtime and `api_key`, no ambient IDE settings, agent/run ID logging, startup vs mid-run error distinction, SDK bridge cleanup on shutdown.
