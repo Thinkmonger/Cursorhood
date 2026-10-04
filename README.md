@@ -12,7 +12,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 - Start in **simulation mode** — paper fills against a multi-asset ledger (equities, options, crypto) with FIFO realized P&L, resting limit/stop orders, and optional T+N settlement. Turn simulation off only when you are ready for live Agentic trades.
 - Trade from a **static symbol list**, one of your Robinhood **watchlists**, a popular list, or a saved **scan**.
 - Pick **one asset class per bot** — equities, single-leg options, or crypto. Crypto bots keep cycling 24/7 instead of sleeping at the equity close.
-- Research symbols from `/research` (search, fundamentals, financials, earnings, news, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
+- Research symbols from `/research` (search, candlestick price history via TradingView Lightweight Charts, fundamentals, financials, earnings, news, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
 - Watch live activity, run history, portfolio sparklines, and per-bot statistics.
 
 Trades never bypass `.cursor/hooks/check_trade.py`. Uncertain setups skip the trade.
@@ -75,6 +75,18 @@ python -m runner.main run-once --bot trueagent
 ```
 
 On Windows, the process keeps the PC from sleeping so scheduled cycles can fire. The monitor and screensaver may still turn off. Stopping the process restores normal power settings.
+
+## Security
+
+The console has no login: it trusts whoever can reach the port. Bind to loopback (the default) and treat the machine as the trust boundary.
+
+- **Origin pinning** rejects cross-site `POST`s that would start, pause, or reset a bot (CSRF).
+- **Host pinning** rejects DNS-rebinding `Host` headers so a hijacked hostname cannot read settings.
+- Responses include `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy`. HTML stays `no-cache`; `/static` and `/locales` cache for a day (assets are already cache-busted with `?v=`).
+- Settings APIs return masked keys (`cursor_api_key_masked`), never the raw secret.
+- WebSocket `/ws` accepts only the same origin set as HTTP writes.
+
+To expose the dashboard beyond loopback, set `DASHBOARD_ALLOWED_HOSTS` and `DASHBOARD_ALLOWED_ORIGINS`. Do not put this process on the public internet.
 
 ## How a cycle works
 

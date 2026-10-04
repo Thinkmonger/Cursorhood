@@ -330,11 +330,56 @@ def compact_ratings(payload: Any) -> dict[str, Any]:
     return {k: row.get(k) for k in _RATING_KEYS if row.get(k) not in (None, "")}
 
 
+RESEARCH_DAILY_BARS = 90
+RESEARCH_YAHOO_RANGE = "6mo"
+
+
+def _chart_time(value: Any) -> str | None:
+    """Lightweight Charts daily series wants YYYY-MM-DD."""
+    if value in (None, ""):
+        return None
+    text = str(value)
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    return None
+
+
+def compact_ohlc_bars(entry: dict[str, Any] | None) -> dict[str, Any]:
+    """Trim raw daily bars to the candlestick payload the research chart uses."""
+    if not isinstance(entry, dict):
+        return {}
+    bars: list[dict[str, Any]] = []
+    for row in entry.get("bars") or []:
+        if not isinstance(row, dict):
+            continue
+        time = _chart_time(row.get("time"))
+        try:
+            open_ = float(row["open"]) if row.get("open") is not None else None
+            high = float(row["high"]) if row.get("high") is not None else None
+            low = float(row["low"]) if row.get("low") is not None else None
+            close = float(row["close"]) if row.get("close") is not None else None
+        except (TypeError, ValueError):
+            continue
+        if not time or None in (open_, high, low, close):
+            continue
+        bars.append({"time": time, "open": open_, "high": high, "low": low, "close": close})
+    if not bars:
+        return {}
+    out: dict[str, Any] = {"bars": bars}
+    if entry.get("provider"):
+        out["provider"] = entry["provider"]
+    return out
+
+
 async def research_report(symbol: str, *, include_financials: bool = True) -> dict[str, Any]:
     """One bounded report per symbol, gathering every market-data tool in parallel."""
     ticker = str(symbol).strip().upper()
     if not ticker:
         return {"ok": False, "error": "No symbol given"}
+
+    from src.trading.historical_bars import fetch_daily_bars
 
     tasks = [
         fetch_fundamentals([ticker]),
@@ -346,6 +391,13 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
     ]
     if include_financials:
         tasks.append(fetch_financials(ticker))
+    tasks.append(
+        fetch_daily_bars(
+            [ticker],
+            max_bars=RESEARCH_DAILY_BARS,
+            yahoo_range=RESEARCH_YAHOO_RANGE,
+        )
+    )
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -367,8 +419,9 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
         "analyst_ratings",
         "financials",
     )
+    named_count = 7 if include_financials else 6
     unavailable = [
-        section_names[i] for i in range(len(results)) if _value(i) in (None, {}, [])
+        section_names[i] for i in range(named_count) if _value(i) in (None, {}, [])
     ]
 
     report: dict[str, Any] = {"ok": True, "symbol": ticker}
@@ -394,10 +447,18 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
         financials = compact_financials(_value(6))
         if financials:
             report["financials"] = financials
+    bars_index = 7 if include_financials else 6
+    bars_payload = _value(bars_index)
+    bars_entry = {}
+    if isinstance(bars_payload, dict):
+        bars_entry = (bars_payload.get("symbols") or {}).get(ticker) or {}
+        chart = compact_ohlc_bars(bars_entry if isinstance(bars_entry, dict) else {})
+        if chart:
+            report["bars"] = chart
 
     if unavailable:
         report["unavailable"] = unavailable
-    if not any(k in report for k in section_names):
+    if not any(k in report for k in (*section_names, "bars")):
         report["ok"] = False
         report["error"] = f"No research data returned for {ticker}"
     return report

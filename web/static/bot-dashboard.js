@@ -1042,8 +1042,8 @@ function bootstrapDashboard() {
 
   refresh();
   refreshPortfolio();
-  setInterval(refresh, 30000);
-  setInterval(refreshPortfolio, 60000);
+  startVisibleInterval(refresh, 45000);
+  startVisibleInterval(refreshPortfolio, 90000);
 }
 
 if (document.readyState === "loading") {

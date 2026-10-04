@@ -241,5 +241,5 @@ if (params.get("run")) {
 whenI18nReady(() => {
   refreshProfileGate();
   refreshRuns();
-  setInterval(refreshRuns, 20000);
+  startVisibleInterval(refreshRuns, 30000);
 });

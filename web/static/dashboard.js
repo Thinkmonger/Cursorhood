@@ -441,7 +441,7 @@ function startDashboard() {
   checkSetup();
   refreshBots();
   startDashboardWs();
-  setInterval(refreshBots, 30000);
+  startVisibleInterval(refreshBots, 90000);
 }
 
 function bootstrapDashboard() {

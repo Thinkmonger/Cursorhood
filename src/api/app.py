@@ -5,11 +5,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.api.bot_settings import router as bot_settings_router
 from src.api.bots import router as bots_router
+from src.api.security import install_security
 from src.api.settings import router as settings_router
 from src.api.statistics import router as statistics_router
 from src.api.system import router as system_router
@@ -45,6 +47,9 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=app_name(), lifespan=lifespan)
 
+    install_security(app)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
     app.include_router(settings_router)
     app.include_router(bots_router)
     app.include_router(bot_settings_router)
@@ -71,10 +76,9 @@ def create_app() -> FastAPI:
         return WEB_DIR / name
 
     def _html_page(name: str) -> FileResponse:
-        return FileResponse(
-            _page(name),
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
-        )
+        # no-cache (not no-store) still revalidates but allows a 304 instead of
+        # re-sending the whole page on every navigation.
+        return FileResponse(_page(name), headers={"Cache-Control": "no-cache"})
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon() -> Response:

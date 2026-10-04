@@ -1,5 +1,6 @@
 let currentSymbol = "";
 const reportCharts = new Map();
+let priceChart = null;
 
 function labelize(key) {
   return String(key)
@@ -42,6 +43,53 @@ function formatCell(value) {
 function destroyReportCharts() {
   reportCharts.forEach((chart) => chart.destroy());
   reportCharts.clear();
+  if (priceChart) {
+    priceChart.remove();
+    priceChart = null;
+  }
+}
+
+function tradingViewSymbol(symbol) {
+  return String(symbol || "").toUpperCase().replace(/-/g, "");
+}
+
+function renderPriceChart(symbol, barsPayload) {
+  const el = document.getElementById("report-price-chart");
+  const link = document.getElementById("tv-link");
+  if (link) {
+    const tv = tradingViewSymbol(symbol);
+    link.href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}`;
+    link.textContent = t("research.openTradingView");
+    link.hidden = false;
+  }
+  if (!el) return;
+  const bars = (barsPayload && barsPayload.bars) || [];
+  if (!bars.length || typeof LightweightCharts === "undefined") {
+    emptyNote("report-price-chart");
+    return;
+  }
+  el.innerHTML = "";
+  priceChart = LightweightCharts.createChart(el, {
+    layout: { background: { color: "transparent" }, textColor: "#8b9cb3" },
+    grid: {
+      vertLines: { color: "rgba(255,255,255,0.06)" },
+      horzLines: { color: "rgba(255,255,255,0.06)" },
+    },
+    rightPriceScale: { borderColor: "#2d3a4d" },
+    timeScale: { borderColor: "#2d3a4d", timeVisible: false },
+    width: el.clientWidth || el.parentElement?.clientWidth || 640,
+    height: 280,
+  });
+  const series = priceChart.addCandlestickSeries({
+    upColor: "#00c805",
+    downColor: "#ff5a5f",
+    borderUpColor: "#00c805",
+    borderDownColor: "#ff5a5f",
+    wickUpColor: "#00c805",
+    wickDownColor: "#ff5a5f",
+  });
+  series.setData(bars);
+  priceChart.timeScale().fitContent();
 }
 
 function chartOrEmpty(target, html) {
@@ -360,6 +408,7 @@ async function loadReport(symbol) {
     const report = await api(`/api/research/${encodeURIComponent(symbol)}`);
     if (!report.ok) throw new Error(report.error || t("research.reportFailed"));
     renderHero(symbol, report.fundamentals, report.price_book);
+    renderPriceChart(symbol, report.bars);
     renderStats(report.fundamentals);
     renderRange(report.fundamentals, report.price_book);
     renderEarnings(report.earnings);

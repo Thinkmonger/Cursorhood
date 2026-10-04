@@ -20,7 +20,7 @@
   },
   "research": {
     "title": "Research",
-    "subtitle": "Fundamentals, financials, earnings, indicators, and scanners straight from Robinhood.",
+    "subtitle": "Price history, fundamentals, financials, earnings, indicators, and scanners straight from Robinhood.",
     "lookupTitle": "Symbol Lookup",
     "searchPlaceholder": "Ticker or company name",
     "search": "Search",
@@ -66,7 +66,9 @@
     "lowTarget": "Low target",
     "rsi": "RSI",
     "macd": "MACD",
-    "sma": "SMA"
+    "sma": "SMA",
+    "priceHistory": "Price history",
+    "openTradingView": "Open on TradingView"
   },
   "watchlist": {
     "backToResearch": "Research",

@@ -88,12 +88,16 @@ async def fetch_daily_bars(
     *,
     skip_robinhood: bool = False,
     skip_massive: bool = False,
+    max_bars: int | None = None,
+    yahoo_range: str | None = None,
 ) -> dict[str, Any]:
     """Fetch daily OHLCV candles through the same provider chain."""
     unique = sorted({s.strip().upper() for s in symbols if s and str(s).strip()})
     if not unique:
         return {"interval": DAILY_INTERVAL, "symbols": {}}
 
+    limit = max_bars if max_bars is not None else MAX_DAILY_BARS
+    yrange = yahoo_range or DAILY_RANGE
     out: dict[str, Any] = {
         "interval": DAILY_INTERVAL,
         "symbols": {},
@@ -104,6 +108,8 @@ async def fetch_daily_bars(
             symbol,
             skip_robinhood=skip_robinhood,
             skip_massive=skip_massive,
+            max_bars=limit,
+            yahoo_range=yrange,
         )
     return out
 
@@ -148,13 +154,15 @@ async def _daily_for_symbol(
     *,
     skip_robinhood: bool = False,
     skip_massive: bool = False,
+    max_bars: int = MAX_DAILY_BARS,
+    yahoo_range: str = DAILY_RANGE,
 ) -> dict[str, Any]:
     if _robinhood_enabled() and not skip_robinhood:
         from src.trading.rh_market_data import fetch_bars
 
         entry = await fetch_bars(symbol, daily=True)
         if not entry.get("error"):
-            entry["bars"] = entry["bars"][-MAX_DAILY_BARS:]
+            entry["bars"] = entry["bars"][-max_bars:]
             return entry
         logger.info("Robinhood daily bars unavailable for %s (%s)", symbol, entry["error"])
 
@@ -164,7 +172,7 @@ async def _daily_for_symbol(
             return entry
         logger.info("Massive daily bars unavailable for %s (%s)", symbol, entry["error"])
 
-    return await _fetch_yahoo_daily_bars(symbol)
+    return await _fetch_yahoo_daily_bars(symbol, max_bars=max_bars, yahoo_range=yahoo_range)
 
 
 def _with_sma(entry: dict[str, Any]) -> dict[str, Any]:
@@ -190,13 +198,18 @@ async def _with_native_indicators(symbol: str, entry: dict[str, Any]) -> dict[st
     return entry
 
 
-async def _fetch_yahoo_daily_bars(symbol: str) -> dict[str, Any]:
+async def _fetch_yahoo_daily_bars(
+    symbol: str,
+    *,
+    max_bars: int = MAX_DAILY_BARS,
+    yahoo_range: str = DAILY_RANGE,
+) -> dict[str, Any]:
     headers = {"User-Agent": "RobinhoodAgenticBot/1.0"}
     try:
         async with async_client(timeout=30) as client:
             response = await client.get(
                 YAHOO_CHART_URL.format(symbol=symbol),
-                params={"interval": DAILY_INTERVAL, "range": DAILY_RANGE},
+                params={"interval": DAILY_INTERVAL, "range": yahoo_range},
                 headers=headers,
             )
         if response.status_code >= 400:
@@ -205,7 +218,7 @@ async def _fetch_yahoo_daily_bars(symbol: str) -> dict[str, Any]:
         if not bars:
             return {"error": "No daily bars returned", "provider": "yahoo"}
         return {
-            "bars": bars[-MAX_DAILY_BARS:],
+            "bars": bars[-max_bars:],
             "bar_count": len(bars),
             "provider": "yahoo",
         }

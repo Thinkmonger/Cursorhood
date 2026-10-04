@@ -422,6 +422,11 @@ body.app-fixed .app-footer {
 
 /* ── Research / watchlist cards ──────────────────────── */
 
+.price-chart {
+  height: 280px;
+  width: 100%;
+}
+
 .metric-card {
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid var(--rh-border);

@@ -56,6 +56,12 @@ function connectWs(onMessage) {
   return ws;
 }
 
+function startVisibleInterval(fn, ms) {
+  return setInterval(() => {
+    if (document.visibilityState === "visible") fn();
+  }, ms);
+}
+
 function homePath(tab) {
   return tab === "config" ? "/?tab=config" : "/";
 }

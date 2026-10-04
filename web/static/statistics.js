@@ -170,5 +170,5 @@ connectWs((msg) => {
 
 whenI18nReady(() => {
   refresh();
-  setInterval(refresh, 30000);
+  startVisibleInterval(refresh, 60000);
 });
