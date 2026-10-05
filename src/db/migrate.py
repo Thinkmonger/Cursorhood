@@ -153,3 +153,26 @@ def migrate_run_numbers(conn: sqlite3.Connection) -> None:
         """,
         (RUN_NUMBER_MIGRATION_KEY, _utc_now()),
     )
+
+
+RUN_USAGE_MIGRATION_KEY = "migration_run_usage_v1"
+
+
+def migrate_run_usage_columns(conn: sqlite3.Connection) -> None:
+    cols = _table_columns(conn, "agent_runs")
+    if "prompt_tokens" not in cols:
+        conn.execute("ALTER TABLE agent_runs ADD COLUMN prompt_tokens INTEGER")
+    if "completion_tokens" not in cols:
+        conn.execute("ALTER TABLE agent_runs ADD COLUMN completion_tokens INTEGER")
+    if "cost_usd" not in cols:
+        conn.execute("ALTER TABLE agent_runs ADD COLUMN cost_usd REAL")
+    if conn.execute(
+        "SELECT 1 FROM app_state WHERE key = ?", (RUN_USAGE_MIGRATION_KEY,)
+    ).fetchone():
+        return
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)
+        """,
+        (RUN_USAGE_MIGRATION_KEY, _utc_now()),
+    )

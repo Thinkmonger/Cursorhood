@@ -59,7 +59,7 @@ async def run_server(host: str, port: int) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Robinhood Agentic Trading Bot")
+    parser = argparse.ArgumentParser(description="Cursorhood Agentic Trading Console")
     parser.add_argument("command", nargs="?", default="run", choices=["run", "run-once"])
     parser.add_argument("--bot", default=DEFAULT_BOT_ID, help="Bot id for run-once")
     args = parser.parse_args()

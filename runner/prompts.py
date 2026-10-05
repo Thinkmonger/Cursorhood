@@ -612,12 +612,18 @@ def finalize_run_record(
         status = "finished"
     elif status == "error":
         error = sdk_text or str(summary) or "Cursor run error"
+    from runner.cursor_agent import extract_sdk_usage
+
+    usage = extract_sdk_usage(result)
     store.finish_run(
         run_id,
         status=str(status),
         summary=str(summary) if summary else None,
         error=error,
         cursor_run_id=cursor_run_id,
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        cost_usd=usage.get("cost_usd"),
     )
     from src.trading.profile_gate import note_run_finished
 

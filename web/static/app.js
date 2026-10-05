@@ -194,6 +194,38 @@ function schedulerBadgeClass(sched) {
   return "text-bg-primary";
 }
 
+function assetClassBadge(assetClass) {
+  const key = String(assetClass || "equity");
+  const label = {
+    equity: t("dashboard.assetEquity"),
+    option: t("dashboard.assetOption"),
+    crypto: t("dashboard.assetCrypto"),
+  }[key] || key;
+  return `<span class="badge text-bg-secondary">${escapeHtml(label)}</span>`;
+}
+
+function runStatusLabel(status) {
+  const key = String(status || "").toLowerCase();
+  const map = {
+    finished: t("run.statusFinished"),
+    error: t("run.statusError"),
+    running: t("run.statusRunning"),
+    cancelled: t("run.statusCancelled"),
+  };
+  return map[key] || (status ? String(status) : t("common.emDash"));
+}
+
+function runStatusBadge(status) {
+  const key = String(status || "").toLowerCase();
+  const cls = {
+    finished: "text-bg-success",
+    error: "text-bg-danger",
+    running: "text-bg-primary",
+    cancelled: "text-bg-secondary",
+  }[key] || "text-bg-secondary";
+  return `<span class="badge ${cls}">${escapeHtml(runStatusLabel(status))}</span>`;
+}
+
 async function populateBotSwitcher(selectId) {
   const el = document.getElementById(selectId);
   if (!el) return;

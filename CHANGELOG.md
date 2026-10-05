@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **Robinhood Agentic Console** are documented in this file.
+All notable changes to **Cursorhood Agentic Trading Console** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Cursorhood** — user-facing product name is **Cursorhood Agentic Trading Console** (short: **Cursorhood**). The footer stack badge and OAuth/keyring identities stay **Robinhood Agentic**.
+- **Live footer usage** — SQL `COUNT` for cycles today, ~30s poll plus WebSocket refresh, console-local MCP/linked-run totals, and SDK tokens when the run result includes them. Remaining Cursor plan % is omitted unless a documented user-key route returns it.
+- **Statistics console** — Overview and Bots tabs matching the bot dashboard: KPI cards, system usage/status, last-run badges, and a single `all_stats()` pass.
+- **Research terminal** — tape, 1H/1D Lightweight Charts with a provider badge, full fundamentals grid, SEC filings, denser news, and a 4×4 watchlist mini-chart grid.
 - **Class-specific bot templates** — equities, options, and crypto each have their own `strategy.md`, limits, and cycle interval under `config/templates/`. The create-bot dialog picks a class instead of cloning the default bot.
 - **SQLite `bot_settings`** — strategy, limits, and per-bot app config persist in `data/bot.db`. Existing YAML is imported once; later edits write SQL only.
 - **OS keyring for API keys** — Cursor and Massive keys saved from the UI go to the `robinhood-agentic-bot` keyring (env / `.env` remain fallbacks). Secrets stay out of SQLite.

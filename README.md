@@ -1,6 +1,6 @@
 # Cursorhood Agentic Trading Console
 
-Local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading). It runs [Cursor](https://cursor.com) agents against the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`, with a dashboard, risk limits, paper trading, and optional extra market data.
+**Cursorhood Agentic Trading Console** is a local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading). It runs [Cursor](https://cursor.com) agents against the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`, with a dashboard, risk limits, paper trading, and optional extra market data.
 
 Cursor’s multi-agent setup is the point: you can run several bots at once and give each the model that matches how you want it to trade — a fast Composer cycle for dip-buys, a heavier Claude or GPT model for options or research, Auto when you want included plan usage. One key, many specialists.
 
@@ -14,7 +14,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 - Start in **simulation mode** — paper fills against a multi-asset ledger (equities, options, crypto) with FIFO realized P&L, resting limit/stop orders, and optional T+N settlement. Turn simulation off only when you are ready for live Agentic trades.
 - Trade from a **static symbol list**, one of your Robinhood **watchlists**, a popular list, or a saved **scan**.
 - Pick **one asset class per bot** — equities, single-leg options, or crypto. Crypto bots keep cycling 24/7 instead of sleeping at the equity close.
-- Research symbols from `/research` (search, candlestick price history via TradingView Lightweight Charts, fundamentals, financials, earnings, news, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
+- Research symbols from `/research` (tape, 1H/1D candlesticks via TradingView Lightweight Charts, full fundamentals, financials, earnings, news, SEC filings, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
 - Watch live activity, run history, a paginated 4×4 price-history grid (or list) for each bot’s scanned tickers, portfolio sparklines, and per-bot statistics.
 
 Trades never bypass `.cursor/hooks/check_trade.py`. Uncertain setups skip the trade.
@@ -31,8 +31,8 @@ New to Robinhood? Open an account with the referral link in [Support this projec
 ## Quick start
 
 ```powershell
-git clone <your-repo-url>
-cd Robinhood
+git clone https://github.com/Thinkmonger/Cursorhood.git
+cd Cursorhood
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
@@ -58,8 +58,8 @@ Open **http://127.0.0.1:8765/** in your browser. Stop the server with **Ctrl+C**
 | `/bots/{id}` | Bot console — portfolio, scheduler, risk, paper trading |
 | `/bots/{id}/agents` | Run history and live activity |
 | `/research` | Symbol search, reports, scanners, watchlists |
-| `/research/watchlists/{id}` | Watchlist overview — every symbol and fundamentals |
-| `/statistics` | Aggregate and per-bot metrics |
+| `/research/watchlists/{id}` | Watchlist overview — 4×4 daily mini-charts |
+| `/statistics` | Overview KPIs, system usage, and per-bot status |
 
 Legacy paths (`/setup`, `/settings`, `/agents`) redirect to the routes above.
 

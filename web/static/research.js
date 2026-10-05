@@ -1,6 +1,9 @@
 let currentSymbol = "";
+let currentReport = null;
+let currentChartInterval = "1d";
 const reportCharts = new Map();
 let priceChart = null;
+const FUNDAMENTAL_SKIP = new Set(["description", "sector", "industry"]);
 
 function labelize(key) {
   return String(key)
@@ -34,12 +37,6 @@ function formatPct(value) {
   return `${pct.toFixed(2)}%`;
 }
 
-function formatCell(value) {
-  if (value == null || value === "") return t("common.emDash");
-  if (typeof value === "number") return formatCompact(value);
-  return String(value);
-}
-
 function destroyReportCharts() {
   reportCharts.forEach((chart) => chart.destroy());
   reportCharts.clear();
@@ -53,22 +50,51 @@ function tradingViewSymbol(symbol) {
   return String(symbol || "").toUpperCase().replace(/-/g, "");
 }
 
-function renderPriceChart(symbol, barsPayload) {
+function barChange(bars) {
+  if (!bars || bars.length < 2) return null;
+  const first = toNumber(bars[0].close);
+  const last = toNumber(bars[bars.length - 1].close);
+  if (first == null || last == null || first === 0) return null;
+  return ((last - first) / first) * 100;
+}
+
+function smaValue(indicators) {
+  if (!indicators) return null;
+  return toNumber(indicators.sma_20 ?? indicators.sma ?? indicators.sma_50);
+}
+
+function renderPriceChart(symbol, barsPayload, indicators) {
   const el = document.getElementById("report-price-chart");
   const link = document.getElementById("tv-link");
+  const providerEl = document.getElementById("chart-provider");
   if (link) {
     const tv = tradingViewSymbol(symbol);
     link.href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}`;
     link.textContent = t("research.openTradingView");
     link.hidden = false;
   }
+  const provider = barsPayload?.provider;
+  if (providerEl) {
+    if (provider) {
+      providerEl.textContent = String(provider);
+      providerEl.classList.remove("d-none");
+    } else {
+      providerEl.textContent = "";
+      providerEl.classList.add("d-none");
+    }
+  }
   if (!el) return;
+  if (priceChart) {
+    priceChart.remove();
+    priceChart = null;
+  }
   const bars = (barsPayload && barsPayload.bars) || [];
   if (!bars.length || typeof LightweightCharts === "undefined") {
     emptyNote("report-price-chart");
     return;
   }
   el.innerHTML = "";
+  const hourly = currentChartInterval === "1h";
   priceChart = LightweightCharts.createChart(el, {
     layout: { background: { color: "transparent" }, textColor: "#8b9cb3" },
     grid: {
@@ -76,9 +102,9 @@ function renderPriceChart(symbol, barsPayload) {
       horzLines: { color: "rgba(255,255,255,0.06)" },
     },
     rightPriceScale: { borderColor: "#2d3a4d" },
-    timeScale: { borderColor: "#2d3a4d", timeVisible: false },
+    timeScale: { borderColor: "#2d3a4d", timeVisible: hourly, secondsVisible: false },
     width: el.clientWidth || el.parentElement?.clientWidth || 640,
-    height: 280,
+    height: 420,
   });
   const series = priceChart.addCandlestickSeries({
     upColor: "#00c805",
@@ -89,7 +115,39 @@ function renderPriceChart(symbol, barsPayload) {
     wickDownColor: "#ff5a5f",
   });
   series.setData(bars);
+  const sma = smaValue(indicators);
+  if (sma != null) {
+    series.createPriceLine({
+      price: sma,
+      color: "#6ea8fe",
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: t("research.sma"),
+    });
+  }
   priceChart.timeScale().fitContent();
+}
+
+function setChartInterval(interval) {
+  currentChartInterval = interval === "1h" ? "1h" : "1d";
+  document.getElementById("chart-int-1h")?.classList.toggle("active", currentChartInterval === "1h");
+  document.getElementById("chart-int-1d")?.classList.toggle("active", currentChartInterval === "1d");
+  if (currentSymbol) loadChartBars(currentSymbol, currentChartInterval);
+}
+
+async function loadChartBars(symbol, interval) {
+  try {
+    const chart = await api(
+      `/api/research/charts/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}`
+    );
+    if (!chart.ok) throw new Error(chart.error || t("research.noData"));
+    renderPriceChart(symbol, chart, currentReport?.indicators);
+  } catch (err) {
+    emptyNote("report-price-chart");
+    const status = document.getElementById("report-status");
+    if (status) status.textContent = String(err.message || err);
+  }
 }
 
 function chartOrEmpty(target, html) {
@@ -112,11 +170,15 @@ function metricCard(label, value) {
   </div>`;
 }
 
-function renderHero(symbol, fundamentals, book) {
+function renderHero(symbol, fundamentals, book, bars) {
   const el = document.getElementById("report-hero");
   if (!el) return;
   const chips = [fundamentals?.sector, fundamentals?.industry].filter(Boolean);
-  const last = book?.last ?? fundamentals?.open;
+  const lastBar = bars?.bars?.length ? bars.bars[bars.bars.length - 1] : null;
+  const last = book?.last ?? lastBar?.close ?? fundamentals?.open;
+  const chg = barChange(bars?.bars);
+  const chgCls = chg == null ? "text-secondary" : chg >= 0 ? "text-success" : "text-danger";
+  const chgTxt = chg == null ? t("common.emDash") : `${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%`;
   el.innerHTML = `
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
       <div class="fs-4 fw-semibold">${escapeHtml(symbol)}</div>
@@ -124,27 +186,42 @@ function renderHero(symbol, fundamentals, book) {
     </div>
     <div class="row g-2">
       ${metricCard(t("research.last"), formatCompact(last))}
+      ${metricCard(t("research.change"), chgTxt)}
       ${metricCard(t("research.bid"), formatCompact(book?.bid))}
       ${metricCard(t("research.ask"), formatCompact(book?.ask))}
+      ${metricCard(t("research.volume"), formatCompact(fundamentals?.volume || fundamentals?.average_volume))}
+      ${metricCard(t("research.week52"), `${formatCompact(fundamentals?.low_52_weeks)} – ${formatCompact(fundamentals?.high_52_weeks)}`)}
     </div>
     ${fundamentals?.description ? `<p class="small text-secondary mt-3 mb-0">${escapeHtml(fundamentals.description)}</p>` : ""}
   `;
+  const changeEl = el.querySelectorAll(".metric-value")[1];
+  if (changeEl) changeEl.classList.add(chgCls);
 }
+
+const FUND_LABELS = {
+  market_cap: "research.marketCap",
+  pe_ratio: "research.peRatio",
+  pb_ratio: "research.pbRatio",
+  dividend_yield: "research.divYield",
+  volume: "research.volume",
+  average_volume: "research.volume",
+};
 
 function renderStats(fundamentals) {
   const el = document.getElementById("report-stats");
   if (!el) return;
   if (!fundamentals || !Object.keys(fundamentals).length) {
-    el.innerHTML = "";
+    emptyNote("report-stats");
     return;
   }
-  el.innerHTML = [
-    metricCard(t("research.marketCap"), formatCompact(fundamentals.market_cap)),
-    metricCard(t("research.peRatio"), formatCompact(fundamentals.pe_ratio)),
-    metricCard(t("research.pbRatio"), formatCompact(fundamentals.pb_ratio)),
-    metricCard(t("research.divYield"), formatPct(fundamentals.dividend_yield)),
-    metricCard(t("research.volume"), formatCompact(fundamentals.volume || fundamentals.average_volume)),
-  ].join("");
+  const cards = Object.entries(fundamentals)
+    .filter(([k]) => !FUNDAMENTAL_SKIP.has(k))
+    .map(([k, v]) => {
+      const label = FUND_LABELS[k] ? t(FUND_LABELS[k]) : labelize(k);
+      const formatted = k === "dividend_yield" ? formatPct(v) : formatCompact(v);
+      return metricCard(label, formatted);
+    });
+  el.innerHTML = cards.join("") || `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
 }
 
 function renderRange(fundamentals, book) {
@@ -235,9 +312,24 @@ function renderFinancials(rows) {
     emptyNote("report-financials");
     return;
   }
+  const keys = ["revenue", "gross_profit", "net_income", "operating_income", "eps", "free_cash_flow"];
+  const tableHead = `<th></th>${rows.map((r, i) => `<th>${escapeHtml(periodLabel(r, i))}</th>`).join("")}`;
+  const tableBody = keys
+    .map((key) => {
+      const cells = rows.map((r) => `<td>${escapeHtml(formatCompact(r[key]))}</td>`).join("");
+      if (!rows.some((r) => r[key] != null && r[key] !== "")) return "";
+      return `<tr><th class="text-secondary small">${escapeHtml(labelize(key))}</th>${cells}</tr>`;
+    })
+    .join("");
   chartOrEmpty(
     "report-financials",
-    `<div class="research-chart"><canvas id="financials-chart"></canvas></div>`
+    `<div class="table-responsive mb-3">
+      <table class="table table-sm table-dark mb-0 align-middle">
+        <thead><tr>${tableHead}</tr></thead>
+        <tbody>${tableBody}</tbody>
+      </table>
+    </div>
+    <div class="research-chart"><canvas id="financials-chart"></canvas></div>`
   );
   makeBarChart(
     "financials-chart",
@@ -320,7 +412,7 @@ function renderIndicators(indicators) {
   const extras = Object.entries(indicators).filter(
     ([k]) => !["rsi", "rsi_14", "macd", "macd_line", "sma_20", "sma", "sma_50"].includes(k)
   );
-  extras.slice(0, 6).forEach(([k, v]) => cards.push(metricCard(labelize(k), formatCompact(v))));
+  extras.slice(0, 8).forEach(([k, v]) => cards.push(metricCard(labelize(k), formatCompact(v))));
   el.innerHTML = cards.length
     ? `<div class="row g-2">${cards.join("")}</div>`
     : `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
@@ -343,6 +435,27 @@ function renderNews(target, rows) {
         <div class="small fw-semibold">${heading}</div>
         <div class="text-secondary small">${escapeHtml([n.source, n.published_at].filter(Boolean).join(" · "))}</div>
         ${n.summary ? `<div class="small mt-1">${escapeHtml(n.summary)}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+}
+
+function renderFilings(rows) {
+  const el = document.getElementById("report-filings");
+  if (!el) return;
+  if (!rows || !rows.length) {
+    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noFilings"))}</p>`;
+    return;
+  }
+  el.innerHTML = rows
+    .map((f) => {
+      const title = escapeHtml(f.title || t("research.filings"));
+      const heading = f.url
+        ? `<a href="${escapeHtml(f.url)}" target="_blank" rel="noopener">${title}</a>`
+        : title;
+      return `<div class="d-flex justify-content-between gap-2 py-1 border-bottom border-secondary-subtle">
+        <div class="small fw-semibold">${heading}</div>
+        <div class="text-secondary small text-nowrap">${escapeHtml(f.filed_at || "")}</div>
       </div>`;
     })
     .join("");
@@ -391,6 +504,9 @@ async function runReport() {
 
 async function loadReport(symbol) {
   currentSymbol = symbol;
+  currentChartInterval = "1d";
+  document.getElementById("chart-int-1h")?.classList.remove("active");
+  document.getElementById("chart-int-1d")?.classList.add("active");
   const params = new URLSearchParams(location.search);
   if (params.get("symbol") !== symbol) {
     params.set("symbol", symbol);
@@ -398,7 +514,7 @@ async function loadReport(symbol) {
   }
   const input = document.getElementById("research-query");
   if (input && !input.value) input.value = symbol;
-  document.getElementById("report-card")?.classList.remove("d-none");
+  document.getElementById("report-area")?.classList.remove("d-none");
   document.getElementById("report-symbol").textContent = symbol;
   const status = document.getElementById("report-status");
   if (status) status.textContent = t("common.loading");
@@ -407,8 +523,9 @@ async function loadReport(symbol) {
   try {
     const report = await api(`/api/research/${encodeURIComponent(symbol)}`);
     if (!report.ok) throw new Error(report.error || t("research.reportFailed"));
-    renderHero(symbol, report.fundamentals, report.price_book);
-    renderPriceChart(symbol, report.bars);
+    currentReport = report;
+    renderHero(symbol, report.fundamentals, report.price_book, report.bars);
+    renderPriceChart(symbol, report.bars, report.indicators);
     renderStats(report.fundamentals);
     renderRange(report.fundamentals, report.price_book);
     renderEarnings(report.earnings);
@@ -416,8 +533,10 @@ async function loadReport(symbol) {
     renderRatings(report.analyst_ratings);
     renderIndicators(report.indicators);
     renderNews("report-news", report.news);
+    renderFilings(report.filings);
     if (status) status.textContent = "";
   } catch (err) {
+    currentReport = null;
     if (status) status.textContent = String(err.message || err);
   }
 }

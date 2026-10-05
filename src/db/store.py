@@ -10,6 +10,7 @@ from src.db.migrate import (
     DEFAULT_BOT_ID,
     migrate_bot_settings_table,
     migrate_run_numbers,
+    migrate_run_usage_columns,
     run_migrations,
 )
 from src.db.schema import SCHEMA_SQL
@@ -36,6 +37,7 @@ class Store:
             run_migrations(conn)
             migrate_run_numbers(conn)
             migrate_bot_settings_table(conn)
+            migrate_run_usage_columns(conn)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -241,16 +243,32 @@ class Store:
         summary: str | None = None,
         error: str | None = None,
         cursor_run_id: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        cost_usd: float | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
                 UPDATE agent_runs
                 SET finished_at = ?, status = ?, summary = ?, error = ?,
-                    cursor_run_id = COALESCE(?, cursor_run_id)
+                    cursor_run_id = COALESCE(?, cursor_run_id),
+                    prompt_tokens = COALESCE(?, prompt_tokens),
+                    completion_tokens = COALESCE(?, completion_tokens),
+                    cost_usd = COALESCE(?, cost_usd)
                 WHERE id = ?
                 """,
-                (utc_now(), status, summary, error, cursor_run_id, run_id),
+                (
+                    utc_now(),
+                    status,
+                    summary,
+                    error,
+                    cursor_run_id,
+                    prompt_tokens,
+                    completion_tokens,
+                    cost_usd,
+                    run_id,
+                ),
             )
 
     def add_event(
@@ -389,13 +407,110 @@ class Store:
             self.finish_run(run_id, "finished", summary="Hook event outside active run")
         self.add_event(run_id, event_type, payload)
 
-    def count_runs(self, bot_id: str) -> int:
+    def count_runs(
+        self,
+        bot_id: str | None = None,
+        *,
+        started_on: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if bot_id:
+            clauses.append("bot_id = ?")
+            params.append(bot_id)
+        if started_on:
+            clauses.append("started_at LIKE ?")
+            params.append(f"{started_on}%")
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM agent_runs WHERE bot_id = ?",
-                (bot_id,),
+                f"SELECT COUNT(*) AS c FROM agent_runs{where}",
+                params,
             ).fetchone()
             return int(row["c"])
+
+    def usage_counters(self) -> dict[str, Any]:
+        """Cheap SQL totals for the footer and Statistics system card."""
+        prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self.connect() as conn:
+            total_bots = int(
+                conn.execute("SELECT COUNT(*) AS n FROM bots").fetchone()["n"]
+            )
+            total_runs = int(
+                conn.execute("SELECT COUNT(*) AS n FROM agent_runs").fetchone()["n"]
+            )
+            runs_today = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS n FROM agent_runs WHERE started_at LIKE ?",
+                    (f"{prefix}%",),
+                ).fetchone()["n"]
+            )
+            finished_today = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS n FROM agent_runs
+                    WHERE started_at LIKE ? AND status = 'finished'
+                    """,
+                    (f"{prefix}%",),
+                ).fetchone()["n"]
+            )
+            error_today = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS n FROM agent_runs
+                    WHERE started_at LIKE ? AND status = 'error'
+                    """,
+                    (f"{prefix}%",),
+                ).fetchone()["n"]
+            )
+            tool_calls = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS n FROM agent_events WHERE type = 'tool_call'"
+                ).fetchone()["n"]
+            )
+            cursor_linked_runs = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) AS n FROM agent_runs
+                    WHERE cursor_run_id IS NOT NULL AND cursor_run_id != ''
+                    """
+                ).fetchone()["n"]
+            )
+            last = conn.execute(
+                "SELECT status FROM agent_runs ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+            prompt_tokens = 0
+            completion_tokens = 0
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_runs)")}
+            if "prompt_tokens" in cols:
+                tok = conn.execute(
+                    """
+                    SELECT COALESCE(SUM(prompt_tokens), 0) AS p,
+                           COALESCE(SUM(completion_tokens), 0) AS c
+                    FROM agent_runs
+                    WHERE started_at LIKE ?
+                    """,
+                    (f"{prefix}%",),
+                ).fetchone()
+                prompt_tokens = int(tok["p"] or 0)
+                completion_tokens = int(tok["c"] or 0)
+        return {
+            "total_bots": total_bots,
+            "total_runs": total_runs,
+            "runs_today": runs_today,
+            "finished_today": finished_today,
+            "error_today": error_today,
+            "tool_calls": tool_calls,
+            "cursor_linked_runs": cursor_linked_runs,
+            "last_run_status": last["status"] if last else None,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "tokens_today": prompt_tokens + completion_tokens,
+        }
 
     def delete_bot_runs(self, bot_id: str) -> int:
         with self.connect() as conn:

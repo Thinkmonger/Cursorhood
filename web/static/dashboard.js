@@ -277,16 +277,6 @@ async function botAction(botId, action) {
   refreshBots();
 }
 
-function assetClassBadge(assetClass) {
-  const key = String(assetClass || "equity");
-  const label = {
-    equity: t("dashboard.assetEquity"),
-    option: t("dashboard.assetOption"),
-    crypto: t("dashboard.assetCrypto"),
-  }[key] || key;
-  return `<span class="badge text-bg-secondary">${escapeHtml(label)}</span>`;
-}
-
 async function createBot() {
   const name = document.getElementById("new-bot-name").value.trim();
   if (!name) return toast(t("dashboard.createNameRequired"));

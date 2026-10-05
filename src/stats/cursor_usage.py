@@ -6,9 +6,8 @@ from typing import Any
 
 from src.http_client import async_client
 from src.settings.service import SettingsService
-from src.stats.service import all_stats
 
-_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
+_CURSOR_CACHE: dict[str, Any] = {"at": 0.0, "data": None}
 _CACHE_TTL_SECONDS = 90
 
 TECHNOLOGIES: list[dict[str, str]] = [
@@ -37,6 +36,12 @@ TECHNOLOGIES: list[dict[str, str]] = [
     },
 ]
 
+_QUOTA_NOTE = (
+    "Remaining Cursor plan % is not available with a user API key. "
+    "Check usage at cursor.com/settings."
+)
+_QUOTA_URL = "https://cursor.com/settings"
+
 
 def _mask_email(email: str | None) -> str | None:
     if not email or "@" not in email:
@@ -49,41 +54,80 @@ def _mask_email(email: str | None) -> str | None:
     return f"{masked_local}@{domain}"
 
 
+def _intish(value: Any) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _floatish(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _walk_token_fields(payload: Any) -> tuple[int, int]:
+    prompt = 0
+    completion = 0
+    seen: list[Any] = []
+
+    def consider(obj: Any, depth: int = 0) -> None:
+        nonlocal prompt, completion
+        if obj is None or depth > 5:
+            return
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                lower = str(key).lower()
+                n = _intish(value)
+                if n is None:
+                    if isinstance(value, (dict, list)):
+                        consider(value, depth + 1)
+                    continue
+                if any(
+                    part in lower
+                    for part in ("prompt", "inputtoken", "input_token")
+                ):
+                    prompt += n
+                elif any(
+                    part in lower
+                    for part in ("completion", "outputtoken", "output_token")
+                ):
+                    completion += n
+                elif lower in ("total_tokens", "totaltokens") and not prompt and not completion:
+                    prompt += n
+            return
+        if isinstance(obj, list):
+            for item in obj[:20]:
+                consider(item, depth + 1)
+
+    consider(payload)
+    seen.append(payload)
+    return prompt, completion
+
+
 def _local_usage_stats() -> dict[str, Any]:
     from src.db.store import Store
 
-    aggregate = all_stats()["aggregate"]
-    store = Store()
-    tool_calls = 0
-    cursor_linked_runs = 0
-    with store.connect() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM agent_events WHERE type = 'tool_call'"
-        ).fetchone()
-        tool_calls = int(row["n"]) if row else 0
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM agent_runs WHERE cursor_run_id IS NOT NULL AND cursor_run_id != ''"
-        ).fetchone()
-        cursor_linked_runs = int(row["n"]) if row else 0
-
-    return {
-        "total_runs": aggregate.get("total_runs", 0),
-        "runs_today": aggregate.get("runs_today", 0),
-        "total_trades": aggregate.get("total_trades", 0),
-        "total_bots": aggregate.get("total_bots", 0),
-        "tool_calls": tool_calls,
-        "cursor_linked_runs": cursor_linked_runs,
-    }
+    return Store().usage_counters()
 
 
 async def _fetch_cursor_account(api_key: str) -> dict[str, Any]:
-    out: dict[str, Any] = {"ok": False}
+    out: dict[str, Any] = {
+        "ok": False,
+        "quota_available": False,
+        "quota_note": _QUOTA_NOTE,
+        "quota_url": _QUOTA_URL,
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
     try:
         async with async_client(timeout=15) as client:
-            me_resp = await client.get(
-                "https://api.cursor.com/v1/me",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
+            me_resp = await client.get("https://api.cursor.com/v1/me", headers=headers)
             if me_resp.status_code == 200:
                 me = me_resp.json()
                 out["ok"] = True
@@ -92,46 +136,110 @@ async def _fetch_cursor_account(api_key: str) -> dict[str, Any]:
                 out["user_id"] = me.get("userId")
 
             agents_resp = await client.get(
-                "https://api.cursor.com/v1/agents",
-                headers={"Authorization": f"Bearer {api_key}"},
+                "https://api.cursor.com/v1/agents", headers=headers
             )
+            items: list[Any] = []
             if agents_resp.status_code == 200:
-                items = agents_resp.json().get("items") or []
+                payload = agents_resp.json()
+                items = payload.get("items") or payload.get("agents") or []
+                if not isinstance(items, list):
+                    items = []
                 out["cloud_agents"] = len(items)
             else:
                 out["cloud_agents"] = None
 
-            out["billing_available"] = False
-            out["billing_note"] = (
-                "Detailed Cursor spend requires an Admin API key (Enterprise team)."
-            )
+            # Documented per-agent usage (Cloud Agents). User keys have no remaining-plan field.
+            cloud_prompt = 0
+            cloud_completion = 0
+            usage_ok = False
+            for item in items[:5]:
+                if not isinstance(item, dict):
+                    continue
+                agent_id = item.get("id") or item.get("agentId")
+                if not agent_id:
+                    continue
+                usage_resp = await client.get(
+                    f"https://api.cursor.com/v1/agents/{agent_id}/usage",
+                    headers=headers,
+                )
+                if usage_resp.status_code != 200:
+                    continue
+                usage_ok = True
+                p, c = _walk_token_fields(usage_resp.json())
+                cloud_prompt += p
+                cloud_completion += c
+
+            if usage_ok:
+                out["cloud_agent_tokens"] = cloud_prompt + cloud_completion
+                out["cloud_agent_prompt_tokens"] = cloud_prompt
+                out["cloud_agent_completion_tokens"] = cloud_completion
+
+            # Best-effort user-key spend/usage routes. 401/404 → omit quota, never scrape cookies.
+            for path in ("/v1/me/usage", "/v1/usage", "/v1/spend"):
+                try:
+                    resp = await client.get(
+                        f"https://api.cursor.com{path}", headers=headers
+                    )
+                except Exception:
+                    continue
+                if resp.status_code != 200:
+                    continue
+                body = resp.json()
+                remaining = None
+                limit = None
+                if isinstance(body, dict):
+                    remaining = (
+                        _floatish(body.get("remaining"))
+                        or _floatish(body.get("percentRemaining"))
+                        or _floatish(body.get("remaining_percent"))
+                    )
+                    limit = _floatish(body.get("limit") or body.get("included"))
+                    used = _floatish(body.get("used") or body.get("spend"))
+                    if remaining is None and limit and used is not None and limit > 0:
+                        remaining = max(0.0, (1 - used / limit) * 100)
+                if remaining is not None:
+                    out["quota_available"] = True
+                    out["quota_percent_remaining"] = round(float(remaining), 1)
+                    out["quota_note"] = None
+                    break
+
+            out["billing_available"] = bool(out.get("quota_available"))
+            if not out["billing_available"]:
+                out["billing_note"] = _QUOTA_NOTE
     except Exception as exc:
         out["error"] = str(exc)
     return out
 
 
-async def get_footer_info() -> dict[str, Any]:
-    """Footer payload: tech stack, local usage, and Cursor account summary."""
+async def _cached_cursor_account(api_key: str | None) -> dict[str, Any]:
     now = time.time()
-    if _CACHE["data"] is not None and (now - float(_CACHE["at"])) < _CACHE_TTL_SECONDS:
-        return _CACHE["data"]
-
-    local = _local_usage_stats()
-    settings = SettingsService("default")
-    api_key = settings.get_cursor_api_key()
+    cached = _CURSOR_CACHE.get("data")
+    if cached is not None and (now - float(_CURSOR_CACHE["at"])) < _CACHE_TTL_SECONDS:
+        return cached
     cursor: dict[str, Any] = {
         "configured": bool(api_key),
         "ok": False,
+        "quota_available": False,
+        "quota_note": _QUOTA_NOTE,
+        "quota_url": _QUOTA_URL,
     }
     if api_key:
         cursor = {**cursor, **await _fetch_cursor_account(api_key)}
+        cursor["configured"] = True
+    _CURSOR_CACHE["at"] = now
+    _CURSOR_CACHE["data"] = cursor
+    return cursor
 
-    payload = {
+
+async def get_footer_info() -> dict[str, Any]:
+    """Footer payload: tech stack, live local usage, cached Cursor account summary."""
+    local = _local_usage_stats()
+    settings = SettingsService("default")
+    api_key = settings.get_cursor_api_key()
+    cursor = await _cached_cursor_account(api_key)
+    return {
         "technologies": TECHNOLOGIES,
         "local": local,
         "cursor": cursor,
         "as_of": time.time(),
     }
-    _CACHE["at"] = now
-    _CACHE["data"] = payload
-    return payload

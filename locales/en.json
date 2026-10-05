@@ -1,7 +1,7 @@
 {
   "app": {
-    "name": "Robinhood Agentic Console",
-    "nameShort": "Agentic Console"
+    "name": "Cursorhood Agentic Trading Console",
+    "nameShort": "Cursorhood"
   },
   "pages": {
     "dashboard": "Dashboard",
@@ -20,7 +20,7 @@
   },
   "research": {
     "title": "Research",
-    "subtitle": "Price history, fundamentals, financials, earnings, indicators, and scanners straight from Robinhood.",
+    "subtitle": "Tape, 1H/1D charts, fundamentals, filings, and scanners from Robinhood.",
     "lookupTitle": "Symbol Lookup",
     "searchPlaceholder": "Ticker or company name",
     "search": "Search",
@@ -68,7 +68,13 @@
     "macd": "MACD",
     "sma": "SMA",
     "priceHistory": "Price history",
-    "openTradingView": "Open on TradingView"
+    "openTradingView": "Open on TradingView",
+    "interval1h": "1H",
+    "interval1d": "1D",
+    "provider": "Provider",
+    "filings": "SEC filings",
+    "noFilings": "No filings.",
+    "change": "Change"
   },
   "watchlist": {
     "backToResearch": "Research",
@@ -511,16 +517,19 @@
   },
   "stats": {
     "pageTitle": "Performance statistics",
+    "subtitle": "Live cycle status, usage, and per-bot performance from run history.",
+    "tabOverview": "Overview",
+    "tabBots": "Bots",
     "viewCards": "Cards",
     "viewTable": "Table",
     "tableBot": "Bot",
-    "tableStatus": "Status",
+    "tableStatus": "Scheduler",
+    "tableLastRunStatus": "Last run",
     "tableRuns": "Runs",
     "tableSuccess": "Success",
     "tableTrades": "Trades",
     "tablePortfolio": "Portfolio",
-    "tableLastRun": "Last run",
-    "subtitle": "Metrics derived from run history and logged portfolio snapshots.",
+    "tableLastRun": "Last run at",
     "aggregateBots": "Bots",
     "aggregateBotsSub": "configured",
     "aggregateRunsToday": "Runs today",
@@ -529,7 +538,19 @@
     "aggregateTradesSub": "all bots",
     "aggregateCombinedPortfolio": "Combined portfolio",
     "aggregatePortfolioSub": "latest snapshots",
-    "cardDashboardLink": "Dashboard"
+    "cardDashboardLink": "Manage",
+    "systemTitle": "System",
+    "systemScheduler": "Scheduler",
+    "systemLastRuns": "Last-run status",
+    "systemMcp": "MCP calls",
+    "systemLinked": "Linked Cursor runs",
+    "systemTokens": "Tokens today",
+    "systemQuota": "Cursor quota",
+    "systemQuotaUnavailable": "Plan remaining % is not exposed on a user API key.",
+    "systemCursorAccount": "Cursor",
+    "emptyBots": "No bots yet.",
+    "loading": "Loading statistics…",
+    "asOf": "As of {time}"
   },
   "footer": {
     "stack": "Stack",
@@ -540,7 +561,11 @@
     "botCycles": "Bot cycles",
     "today": "Today",
     "mcpCalls": "MCP calls",
-    "linkedRuns": "Linked runs"
+    "linkedRuns": "Linked runs",
+    "tokensToday": "Tokens today",
+    "quotaRemaining": "Quota left",
+    "lastRun": "Last run",
+    "quotaHint": "Remaining plan % is not available with a user API key."
   },
   "system": {
     "restartConfirm": "Restart the bot server? The page will reconnect in a few seconds.",

@@ -478,21 +478,23 @@ body.app-body.app-scroll > .agents-frame {
 
 .app-footer-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.75rem 1.5rem;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.55rem;
 }
 
 .app-footer-section {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem 0.55rem;
   min-width: 0;
 }
 
 .app-footer-section-grow {
-  flex: 1 1 16rem;
+  flex: 0 0 auto;
 }
 
 .app-footer-heading {
@@ -507,6 +509,7 @@ body.app-body.app-scroll > .agents-frame {
 .app-footer-badges {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 0.3rem;
 }
 
@@ -533,6 +536,7 @@ a.app-footer-badge:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem 0.35rem;
   color: #9aa8ba;
 }
@@ -565,8 +569,16 @@ body.app-fixed .app-footer {
 /* ── Research / watchlist cards ──────────────────────── */
 
 .price-chart {
-  height: 280px;
+  height: 420px;
   width: 100%;
+}
+
+.price-chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
 }
 
 .metric-card {

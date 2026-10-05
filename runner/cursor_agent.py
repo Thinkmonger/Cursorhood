@@ -35,6 +35,81 @@ class CursorAgentRunResult:
     cursor_run_id: str | None
 
 
+def _intish_usage(value: Any) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_sdk_usage(result: Any) -> dict[str, int | float | None]:
+    """Pull token/cost fields from a Cursor SDK run result when present."""
+    prompt: int | None = None
+    completion: int | None = None
+    cost: float | None = None
+
+    def consider(obj: Any, depth: int = 0) -> None:
+        nonlocal prompt, completion, cost
+        if obj is None or depth > 4:
+            return
+        if isinstance(obj, str):
+            return
+        blob: dict[str, Any] | None = None
+        if isinstance(obj, dict):
+            blob = obj
+        else:
+            dump = getattr(obj, "model_dump", None) or getattr(obj, "dict", None)
+            if callable(dump):
+                try:
+                    dumped = dump()
+                    if isinstance(dumped, dict):
+                        blob = dumped
+                except Exception:
+                    blob = None
+            if blob is None:
+                for attr in ("usage", "token_usage", "tokenUsage", "tokens"):
+                    if hasattr(obj, attr):
+                        consider(getattr(obj, attr), depth + 1)
+
+        if not blob:
+            return
+        for key, value in blob.items():
+            lower = str(key).lower()
+            n = _intish_usage(value)
+            if n is not None:
+                if any(part in lower for part in ("prompt", "input_token", "inputtoken")):
+                    prompt = n if prompt is None else prompt
+                elif any(
+                    part in lower for part in ("completion", "output_token", "outputtoken")
+                ):
+                    completion = n if completion is None else completion
+            if cost is None and lower in ("cost", "cost_usd", "costusd", "total_cost"):
+                try:
+                    cost = float(value)
+                except (TypeError, ValueError):
+                    pass
+            if isinstance(value, (dict, list)) or (
+                value is not None and not isinstance(value, (str, int, float, bool))
+            ):
+                if str(key).lower() in (
+                    "usage",
+                    "token_usage",
+                    "tokenusage",
+                    "tokens",
+                    "result",
+                ):
+                    consider(value, depth + 1)
+
+    consider(result)
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "cost_usd": cost,
+    }
+
+
 def request_cursor_bridge_shutdown() -> None:
     """Signal in-flight Cursor runs that the bridge is about to close."""
     _SHUTDOWN_REQUESTED.set()

@@ -114,11 +114,15 @@ async def research_charts_batch(body: ChartsBatchBody) -> dict[str, Any]:
         payload = await fetch_hourly_bars(tickers)
     else:
         payload = await fetch_daily_bars(tickers, max_bars=90, yahoo_range="6mo")
+    interval_label = payload.get("interval") or ("1h" if hourly else "1d")
     symbols: dict[str, Any] = {}
     rows = payload.get("symbols") or {}
     for ticker in tickers:
         entry = rows.get(ticker) or {}
-        chart = compact_ohlc_bars(entry if isinstance(entry, dict) else {})
+        chart = compact_ohlc_bars(
+            entry if isinstance(entry, dict) else {},
+            interval=interval_label,
+        )
         if chart:
             symbols[ticker] = {"ok": True, **chart}
         else:
@@ -142,7 +146,13 @@ async def research_chart(symbol: str, interval: str = "1d") -> dict[str, Any]:
     else:
         payload = await fetch_daily_bars([ticker], max_bars=90, yahoo_range="6mo")
     entry = (payload.get("symbols") or {}).get(ticker) or {}
-    chart = compact_ohlc_bars(entry if isinstance(entry, dict) else {})
+    interval_label = payload.get("interval") or (
+        "1h" if interval in ("1h", "hour", "hourly") else "1d"
+    )
+    chart = compact_ohlc_bars(
+        entry if isinstance(entry, dict) else {},
+        interval=interval_label,
+    )
     if not chart:
         return {
             "ok": False,

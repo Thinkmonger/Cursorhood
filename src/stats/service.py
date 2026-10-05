@@ -62,13 +62,12 @@ def _today_iso_prefix() -> str:
 
 def bot_stats(bot_id: str, *, run_limit: int = 500, light: bool = False) -> dict[str, Any]:
     store = Store()
+    today = _today_iso_prefix()
     runs = store.get_runs(limit=run_limit, bot_id=bot_id)
     total = store.count_runs(bot_id)
-    finished = sum(1 for r in runs if r.get("status") == "finished")
-    errors = sum(1 for r in runs if r.get("status") == "error")
-    runs_today = sum(
-        1 for r in runs if (r.get("started_at") or "").startswith(_today_iso_prefix())
-    )
+    finished = store.count_runs(bot_id, status="finished")
+    errors = store.count_runs(bot_id, status="error")
+    runs_today = store.count_runs(bot_id, started_on=today)
 
     actions: Counter[str] = Counter()
     portfolio_series: list[dict[str, Any]] = []
@@ -175,7 +174,16 @@ def all_stats() -> dict[str, Any]:
         "total_bots": len(bots),
         "total_runs": sum(s["total_runs"] for s in per_bot.values()),
         "runs_today": sum(s["runs_today"] for s in per_bot.values()),
+        "finished_runs": sum(s["finished_runs"] for s in per_bot.values()),
+        "error_runs": sum(s["error_runs"] for s in per_bot.values()),
         "total_trades": sum(s["trades_placed"] for s in per_bot.values()),
         "combined_portfolio": sum(portfolio_values) if portfolio_values else 0,
+        "last_run_status": dict(
+            Counter(
+                s["last_run_status"]
+                for s in per_bot.values()
+                if s.get("last_run_status")
+            )
+        ),
     }
     return {"aggregate": aggregate, "bots": per_bot}

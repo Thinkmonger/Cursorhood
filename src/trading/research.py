@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.rh_market_data import (
@@ -292,7 +293,7 @@ _NEWS_FIELD_ALIASES = {
 }
 
 
-def compact_news(payload: Any, *, limit: int = 5) -> list[dict[str, Any]]:
+def compact_news(payload: Any, *, limit: int = 10) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in _list_rows(payload, "news", "articles", "results")[:limit]:
         entry: dict[str, Any] = {}
@@ -330,15 +331,68 @@ def compact_ratings(payload: Any) -> dict[str, Any]:
     return {k: row.get(k) for k in _RATING_KEYS if row.get(k) not in (None, "")}
 
 
+def compact_filings(payload: Any, *, limit: int = 8) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in _list_rows(payload, "filings", "documents", "results", "data")[:limit]:
+        entry: dict[str, Any] = {}
+        title = (
+            row.get("title")
+            or row.get("form_type")
+            or row.get("formType")
+            or row.get("type")
+            or row.get("form")
+        )
+        if title:
+            entry["title"] = str(title)
+        date = (
+            row.get("filed_at")
+            or row.get("filing_date")
+            or row.get("filedAt")
+            or row.get("date")
+        )
+        if date:
+            entry["filed_at"] = str(date)[:10]
+        url = row.get("url") or row.get("html_url") or row.get("link") or row.get("filing_url")
+        if url:
+            entry["url"] = str(url)
+        if entry:
+            rows.append(entry)
+    return rows
+
+
 RESEARCH_DAILY_BARS = 90
 RESEARCH_YAHOO_RANGE = "6mo"
 
 
-def _chart_time(value: Any) -> str | None:
-    """Lightweight Charts daily series wants YYYY-MM-DD."""
+def _is_intraday(interval: str | None) -> bool:
+    return str(interval or "").strip().lower() in ("1h", "hour", "hourly", "60min", "60m")
+
+
+def _chart_time(value: Any, *, intraday: bool = False) -> str | int | None:
+    """Daily bars use YYYY-MM-DD; hourly bars use UTC unix seconds."""
     if value in (None, ""):
         return None
+    if isinstance(value, (int, float)):
+        n = int(value)
+        if n > 10_000_000_000:
+            n //= 1000
+        if intraday:
+            return n
+        return datetime.fromtimestamp(n, tz=timezone.utc).strftime("%Y-%m-%d")
     text = str(value)
+    if intraday:
+        if text.isdigit():
+            n = int(text)
+            if n > 10_000_000_000:
+                n //= 1000
+            return n
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            return None
     if "T" in text:
         text = text.split("T", 1)[0]
     if len(text) >= 10 and text[4] == "-" and text[7] == "-":
@@ -346,15 +400,21 @@ def _chart_time(value: Any) -> str | None:
     return None
 
 
-def compact_ohlc_bars(entry: dict[str, Any] | None) -> dict[str, Any]:
-    """Trim raw daily bars to the candlestick payload the research chart uses."""
+def compact_ohlc_bars(
+    entry: dict[str, Any] | None,
+    *,
+    interval: str | None = None,
+) -> dict[str, Any]:
+    """Trim raw bars to the candlestick payload the research chart uses."""
     if not isinstance(entry, dict):
         return {}
+    resolved_interval = interval or entry.get("interval")
+    intraday = _is_intraday(str(resolved_interval) if resolved_interval else None)
     bars: list[dict[str, Any]] = []
     for row in entry.get("bars") or []:
         if not isinstance(row, dict):
             continue
-        time = _chart_time(row.get("time"))
+        time = _chart_time(row.get("time"), intraday=intraday)
         try:
             open_ = float(row["open"]) if row.get("open") is not None else None
             high = float(row["high"]) if row.get("high") is not None else None
@@ -370,6 +430,8 @@ def compact_ohlc_bars(entry: dict[str, Any] | None) -> dict[str, Any]:
     out: dict[str, Any] = {"bars": bars}
     if entry.get("provider"):
         out["provider"] = entry["provider"]
+    if resolved_interval:
+        out["interval"] = resolved_interval
     return out
 
 
@@ -398,6 +460,7 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
             yahoo_range=RESEARCH_YAHOO_RANGE,
         )
     )
+    tasks.append(fetch_sec_filing_index(ticker))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -418,6 +481,7 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
         "news",
         "analyst_ratings",
         "financials",
+        "filings",
     )
     named_count = 7 if include_financials else 6
     unavailable = [
@@ -449,12 +513,20 @@ async def research_report(symbol: str, *, include_financials: bool = True) -> di
             report["financials"] = financials
     bars_index = 7 if include_financials else 6
     bars_payload = _value(bars_index)
-    bars_entry = {}
     if isinstance(bars_payload, dict):
         bars_entry = (bars_payload.get("symbols") or {}).get(ticker) or {}
-        chart = compact_ohlc_bars(bars_entry if isinstance(bars_entry, dict) else {})
+        chart = compact_ohlc_bars(
+            bars_entry if isinstance(bars_entry, dict) else {},
+            interval=bars_payload.get("interval") or "1d",
+        )
         if chart:
             report["bars"] = chart
+    filings_index = bars_index + 1
+    filings = compact_filings(_value(filings_index))
+    if filings:
+        report["filings"] = filings
+    elif _value(filings_index) in (None, {}, []):
+        unavailable.append("filings")
 
     if unavailable:
         report["unavailable"] = unavailable

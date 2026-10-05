@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     finished_at TEXT,
     status TEXT NOT NULL DEFAULT 'running',
     summary TEXT,
-    error TEXT
+    error TEXT,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    cost_usd REAL
 );
 
 CREATE TABLE IF NOT EXISTS agent_events (

@@ -35,7 +35,7 @@ function applyI18n(root = document) {
 
   const pageKey = document.documentElement.getAttribute("data-i18n-page");
   if (pageKey) {
-    document.title = `${t(`pages.${pageKey}`)} — ${t("app.name")}`;
+    document.title = `${t(`pages.${pageKey}`)} — ${t("app.nameShort")}`;
   }
 }
 

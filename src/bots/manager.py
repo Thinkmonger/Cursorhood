@@ -54,14 +54,23 @@ class BotManager:
             out.append(self.bot_snapshot(bot["id"], stats_run_limit=stats_run_limit, light=light))
         return out
 
-    def bot_snapshot(self, bot_id: str, *, stats_run_limit: int = 500, light: bool = False) -> dict[str, Any]:
-        from src.stats.service import bot_stats
-
+    def bot_snapshot(
+        self,
+        bot_id: str,
+        *,
+        stats_run_limit: int = 500,
+        light: bool = False,
+        include_stats: bool = True,
+    ) -> dict[str, Any]:
         self._ensure_bot(bot_id)
         sched = self._schedulers[bot_id]
         runs = self.store.get_runs(limit=1, bot_id=bot_id)
         active = self.store.get_active_run(bot_id=bot_id)
-        stats = bot_stats(bot_id, run_limit=stats_run_limit, light=light)
+        stats: dict[str, Any] = {}
+        if include_stats:
+            from src.stats.service import bot_stats
+
+            stats = bot_stats(bot_id, run_limit=stats_run_limit, light=light)
         started = self.store.get_bot_state(bot_id, "scheduler_started") == "true"
         paused = sched.paused
         next_run = sched.next_scheduled_run_at
