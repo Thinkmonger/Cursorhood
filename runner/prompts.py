@@ -595,15 +595,23 @@ def finalize_run_record(
     cursor_run_id: str | None = None,
     bot_id: str = DEFAULT_BOT_ID,
 ) -> None:
-    status = getattr(result, "status", "finished")
-    summary = getattr(result, "result", None) or getattr(result, "text", None)
-    _ensure_status_log_from_summary(store, run_id, bot_id, str(summary) if summary else None)
+    status = str(getattr(result, "status", "finished") or "finished")
+    raw_result = getattr(result, "result", None) or getattr(result, "text", None)
+    sdk_text = str(raw_result).strip() if raw_result else ""
+    _ensure_status_log_from_summary(store, run_id, bot_id, sdk_text or None)
     structured = _status_log_summary(store, run_id)
-    if structured:
-        summary = structured if not summary else f"{structured}\n\n---\n\n{summary}"
+    if structured and sdk_text:
+        summary: str | None = f"{structured}\n\n---\n\n{sdk_text}"
+    else:
+        summary = structured or sdk_text or None
     error = None
-    if status == "error":
-        error = str(summary)
+    # Cursor WaitLiveRun maps an empty/unspecified payload to status=error
+    # with no result text. If log_event already stored a cycle summary, this
+    # is a completed cycle — not a failed one.
+    if status == "error" and structured and not sdk_text:
+        status = "finished"
+    elif status == "error":
+        error = sdk_text or str(summary) or "Cursor run error"
     store.finish_run(
         run_id,
         status=str(status),

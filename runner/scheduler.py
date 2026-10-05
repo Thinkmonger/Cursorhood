@@ -345,12 +345,14 @@ class Scheduler:
             outcome.cursor_run_id,
             bot_id=self.bot_id,
         )
+        stored = self.store.get_run(run_id) or {}
         emit_agent_event(
             run_id,
             self.bot_id,
             "run_end",
             {
-                "status": getattr(outcome.result, "status", "finished"),
+                "status": stored.get("status")
+                or getattr(outcome.result, "status", "finished"),
                 "agent_id": outcome.agent_id,
                 "cursor_run_id": outcome.cursor_run_id,
             },
