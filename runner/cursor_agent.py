@@ -186,14 +186,17 @@ def execute_local_agent_run(
 
         result = _drive_run(run, run_id, on_message)
         status = getattr(result, "status", "finished")
-
-        if status == "error":
+        sdk_text = str(getattr(result, "result", "") or "").strip()
+        # Empty WaitLiveRun payloads are normalized to status=error with no
+        # result text; those cycles still completed (see finalize_run_record).
+        if status == "error" and sdk_text:
             logger.error(
-                "Cursor run failed mid-flight bot=%s db_run=%s agent_id=%s cursor_run_id=%s",
+                "Cursor run failed mid-flight bot=%s db_run=%s agent_id=%s cursor_run_id=%s: %s",
                 bot_id,
                 run_id,
                 agent_id,
                 cursor_run_id,
+                sdk_text[:300],
             )
         return CursorAgentRunResult(
             result=result,

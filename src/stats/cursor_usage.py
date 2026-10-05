@@ -26,6 +26,11 @@ TECHNOLOGIES: list[dict[str, str]] = [
         "url": "https://robinhood.com/us/en/agentic-trading",
     },
     {
+        "id": "yahoo",
+        "label": "Yahoo Finance",
+        "url": "https://finance.yahoo.com",
+    },
+    {
         "id": "massive",
         "label": "Massive",
         "url": "https://massive.com/docs/rest/quickstart",

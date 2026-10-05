@@ -70,6 +70,14 @@ class MinuteRateLimiter:
             if self._timestamps:
                 self._timestamps.pop()
 
+    async def mark_remote_exhausted(self) -> None:
+        """Fill the current window after a remote HTTP 429 so we stop sending."""
+        async with self._lock:
+            now = time.monotonic()
+            self._prune(now)
+            while len(self._timestamps) < self.max_calls:
+                self._timestamps.append(now)
+
     def snapshot(self) -> dict[str, int | float]:
         return {
             "limit_per_minute": self.max_calls,

@@ -19,30 +19,28 @@ DAILY_LOOKBACK_DAYS = 21
 MAX_DAILY_BARS = 12
 
 
-def _api_key_from_env_file() -> str | None:
-    """Fallback when the process env was never populated (e.g. uvicorn entry point)."""
-    from src.paths import ENV_PATH
+_CRYPTO_QUOTES = ("USD", "USDT", "USDC", "EUR")
 
-    if not ENV_PATH.exists():
-        return None
-    try:
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            name, _, value = stripped.partition("=")
-            if name.strip() in ("MASSIVE_API_KEY", "POLYGON_API_KEY") and value.strip():
-                return value.strip()
-    except OSError:
-        return None
-    return None
+
+def massive_ticker(symbol: str) -> str:
+    """Massive crypto aggregates use ``X:BTCUSD``, not ``BTC-USD``."""
+    text = (symbol or "").strip().upper()
+    if "-" in text:
+        base, quote = text.split("-", 1)
+        if base and quote in _CRYPTO_QUOTES:
+            return f"X:{base}{quote}"
+    return text
 
 
 def massive_api_key() -> str | None:
-    key = os.environ.get("MASSIVE_API_KEY") or os.environ.get("POLYGON_API_KEY")
-    if key and key.strip():
+    """Env, OS keyring, then `.env`. POLYGON_API_KEY remains an env-only alias."""
+    from src.auth.secrets import get_secret
+
+    key = get_secret("MASSIVE_API_KEY")
+    if key:
         return key.strip()
-    return _api_key_from_env_file()
+    poly = (os.environ.get("POLYGON_API_KEY") or "").strip()
+    return poly or None
 
 
 def massive_enabled() -> bool:
@@ -97,6 +95,7 @@ async def _massive_get(path: str, params: dict[str, Any]) -> tuple[dict[str, Any
         return None, str(exc)
 
     if response.status_code == 429:
+        await get_massive_rate_limiter().mark_remote_exhausted()
         return None, "Massive HTTP 429 (rate limited)"
     if response.status_code == 401:
         return None, "Massive HTTP 401 (invalid API key)"
@@ -193,11 +192,12 @@ async def fetch_hourly_bars_for_symbol(
                 return {"error": "Massive rate limit wait timed out"}
             return {"error": "Massive rate limit reached (calls/minute quota exhausted)"}
 
-        ticker = symbol.strip().upper()
+        ticker = massive_ticker(symbol)
         end = datetime.now(timezone.utc).date()
         start = end - timedelta(days=BAR_LOOKBACK_DAYS)
+        use_sma = _use_sma_endpoint() and not ticker.startswith("X:")
 
-        if _use_sma_endpoint():
+        if use_sma:
             entry = await _fetch_massive_hourly_sma(ticker, start, end)
             if not entry.get("error"):
                 return entry
@@ -215,7 +215,6 @@ async def fetch_hourly_bars_for_symbol(
             last_error = entry["error"]
 
         if is_rate_limit_error(last_error):
-            await get_massive_rate_limiter().release_last()
             if wait and attempt + 1 < attempts:
                 logger.info(
                     "Massive rate limited for %s (attempt %s/%s); waiting for quota",
@@ -258,12 +257,10 @@ async def fetch_daily_bars_for_symbol(
             return {"error": "Massive rate limit wait timed out"}
         return {"error": "Massive rate limit reached (calls/minute quota exhausted)"}
 
-    ticker = symbol.strip().upper()
+    ticker = massive_ticker(symbol)
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=DAILY_LOOKBACK_DAYS)
     entry = await _fetch_massive_daily_aggs(ticker, start, end)
-    if entry.get("error") and is_rate_limit_error(entry["error"]):
-        await get_massive_rate_limiter().release_last()
     return entry
 
 

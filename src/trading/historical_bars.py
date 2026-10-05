@@ -1,8 +1,9 @@
-"""Historical bars via a provider chain: Robinhood, then Massive, then Yahoo.
+"""Historical bars via a provider chain: Robinhood, then Yahoo, then Massive.
 
-Robinhood's agentic MCP exposes `get_equity_historicals`, so it is tried first and
-the third-party providers act as fallbacks. Entries keep the `provider` field so
-the UI can show where each symbol's data came from.
+Robinhood's agentic MCP exposes `get_equity_historicals`, so it is tried first.
+Yahoo is the default fallback. Massive is last-resort when a key is configured
+and both earlier providers failed. Entries keep the `provider` field so the UI
+can show where each symbol's data came from.
 """
 
 from __future__ import annotations
@@ -67,7 +68,13 @@ async def fetch_hourly_bars(
             skip_robinhood=skip_robinhood,
             skip_massive=skip_massive,
         )
-        if entry.get("error") and massive_enabled() and not skip_robinhood and not skip_massive:
+        if (
+            entry.get("error")
+            and massive_enabled()
+            and not skip_massive
+            and is_rate_limit_error(str(entry.get("error") or ""))
+            and "http 429" not in str(entry.get("error") or "").lower()
+        ):
             needs_massive_retry.append(symbol)
         out["symbols"][symbol] = entry
 
@@ -118,9 +125,9 @@ def _chain_label() -> str:
     providers = []
     if _robinhood_enabled():
         providers.append("robinhood")
+    providers.append("yahoo")
     if massive_enabled():
         providers.append("massive")
-    providers.append("yahoo")
     return "+".join(providers)
 
 
@@ -139,14 +146,19 @@ async def _hourly_for_symbol(
             return await _with_native_indicators(symbol, _with_sma(entry))
         logger.info("Robinhood bars unavailable for %s (%s)", symbol, entry["error"])
 
+    yahoo = await _fetch_yahoo_hourly_bars(symbol)
+    if not yahoo.get("error"):
+        return yahoo
+    logger.info("Yahoo bars unavailable for %s (%s)", symbol, yahoo["error"])
+
     if massive_enabled() and not skip_massive:
         entry = await fetch_hourly_bars_for_symbol(symbol, wait=False)
         if not entry.get("error"):
             return _with_sma(entry)
-        if not is_rate_limit_error(entry["error"]):
-            logger.info("Massive bars unavailable for %s (%s)", symbol, entry["error"])
+        logger.info("Massive bars unavailable for %s (%s)", symbol, entry["error"])
+        return entry
 
-    return await _fetch_yahoo_hourly_bars(symbol)
+    return yahoo
 
 
 async def _daily_for_symbol(
@@ -166,13 +178,19 @@ async def _daily_for_symbol(
             return entry
         logger.info("Robinhood daily bars unavailable for %s (%s)", symbol, entry["error"])
 
+    yahoo = await _fetch_yahoo_daily_bars(symbol, max_bars=max_bars, yahoo_range=yahoo_range)
+    if not yahoo.get("error"):
+        return yahoo
+    logger.info("Yahoo daily bars unavailable for %s (%s)", symbol, yahoo["error"])
+
     if massive_enabled() and not skip_massive:
         entry = await fetch_daily_bars_for_symbol(symbol, wait=False)
         if not entry.get("error"):
             return entry
         logger.info("Massive daily bars unavailable for %s (%s)", symbol, entry["error"])
+        return entry
 
-    return await _fetch_yahoo_daily_bars(symbol, max_bars=max_bars, yahoo_range=yahoo_range)
+    return yahoo
 
 
 def _with_sma(entry: dict[str, Any]) -> dict[str, Any]:
@@ -198,6 +216,21 @@ async def _with_native_indicators(symbol: str, entry: dict[str, Any]) -> dict[st
     return entry
 
 
+def _yahoo_chart_tickers(symbol: str) -> list[str]:
+    """Yahoo lists most crypto as ``BTC-USD``; a few only resolve as ``BTCUSD=X``."""
+    text = (symbol or "").strip().upper()
+    if not text:
+        return []
+    tickers = [text]
+    if "-" in text:
+        base, _, quote = text.partition("-")
+        if base and quote:
+            for extra in (f"{base}{quote}", f"{base}{quote}=X"):
+                if extra not in tickers:
+                    tickers.append(extra)
+    return tickers
+
+
 async def _fetch_yahoo_daily_bars(
     symbol: str,
     *,
@@ -205,23 +238,28 @@ async def _fetch_yahoo_daily_bars(
     yahoo_range: str = DAILY_RANGE,
 ) -> dict[str, Any]:
     headers = {"User-Agent": "RobinhoodAgenticBot/1.0"}
+    last_error = "No daily bars returned"
     try:
         async with async_client(timeout=30) as client:
-            response = await client.get(
-                YAHOO_CHART_URL.format(symbol=symbol),
-                params={"interval": DAILY_INTERVAL, "range": yahoo_range},
-                headers=headers,
-            )
-        if response.status_code >= 400:
-            return {"error": f"HTTP {response.status_code}", "provider": "yahoo"}
-        bars = _parse_yahoo_chart(response.json())
-        if not bars:
-            return {"error": "No daily bars returned", "provider": "yahoo"}
-        return {
-            "bars": bars[-max_bars:],
-            "bar_count": len(bars),
-            "provider": "yahoo",
-        }
+            for ticker in _yahoo_chart_tickers(symbol):
+                response = await client.get(
+                    YAHOO_CHART_URL.format(symbol=ticker),
+                    params={"interval": DAILY_INTERVAL, "range": yahoo_range},
+                    headers=headers,
+                )
+                if response.status_code >= 400:
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+                bars = _parse_yahoo_chart(response.json())
+                if not bars:
+                    last_error = "No daily bars returned"
+                    continue
+                return {
+                    "bars": bars[-max_bars:],
+                    "bar_count": len(bars),
+                    "provider": "yahoo",
+                }
+        return {"error": last_error, "provider": "yahoo"}
     except Exception as exc:
         logger.warning("Failed to fetch daily bars for %s via Yahoo: %s", symbol, exc)
         return {"error": str(exc), "provider": "yahoo"}
@@ -229,25 +267,30 @@ async def _fetch_yahoo_daily_bars(
 
 async def _fetch_yahoo_hourly_bars(symbol: str) -> dict[str, Any]:
     headers = {"User-Agent": "RobinhoodAgenticBot/1.0"}
+    last_error = "No hourly bars returned"
     try:
         async with async_client(timeout=30) as client:
-            response = await client.get(
-                YAHOO_CHART_URL.format(symbol=symbol),
-                params={"interval": BAR_INTERVAL, "range": BAR_RANGE},
-                headers=headers,
-            )
-        if response.status_code >= 400:
-            return {"error": f"HTTP {response.status_code}", "provider": "yahoo"}
-        bars = _parse_yahoo_chart(response.json())
-        if not bars:
-            return {"error": "No hourly bars returned", "provider": "yahoo"}
-        return _with_sma(
-            {
-                "bars": bars[-MAX_BARS:],
-                "bar_count": len(bars),
-                "provider": "yahoo",
-            }
-        )
+            for ticker in _yahoo_chart_tickers(symbol):
+                response = await client.get(
+                    YAHOO_CHART_URL.format(symbol=ticker),
+                    params={"interval": BAR_INTERVAL, "range": BAR_RANGE},
+                    headers=headers,
+                )
+                if response.status_code >= 400:
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+                bars = _parse_yahoo_chart(response.json())
+                if not bars:
+                    last_error = "No hourly bars returned"
+                    continue
+                return _with_sma(
+                    {
+                        "bars": bars[-MAX_BARS:],
+                        "bar_count": len(bars),
+                        "provider": "yahoo",
+                    }
+                )
+        return {"error": last_error, "provider": "yahoo"}
     except Exception as exc:
         logger.warning("Failed to fetch 1h bars for %s via Yahoo: %s", symbol, exc)
         return {"error": str(exc), "provider": "yahoo"}

@@ -1,7 +1,7 @@
 """Robinhood MCP market-data tools normalized to the shared bar/indicator shapes.
 
 Bars come back as ``{"time","open","high","low","close","volume"}`` so the
-Massive and Yahoo providers in ``historical_bars`` remain drop-in alternatives.
+Yahoo and Massive providers in ``historical_bars`` remain drop-in alternatives.
 """
 
 from __future__ import annotations

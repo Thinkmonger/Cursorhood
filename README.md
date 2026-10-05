@@ -24,7 +24,7 @@ Trades never bypass `.cursor/hooks/check_trade.py`. Uncertain setups skip the tr
 - Python 3.11+
 - A [Cursor API key](https://cursor.com/settings) (cycles bill as **API usage**, not IDE Auto/Composer quota)
 - [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading) access and a **funded Agentic account**
-- Optional: [Massive API key](https://massive.com/docs/rest/quickstart) if you want Massive as a fallback when Robinhood historicals are unavailable (free tier: 5 calls/minute)
+- Optional: [Massive API key](https://massive.com/docs/rest/quickstart) if you want Massive as a last-resort fallback when Robinhood and Yahoo historicals are unavailable (free tier: 5 calls/minute)
 
 New to Robinhood? Open an account with the referral link in [Support this project](#support-this-project) — you get a stock reward, and it helps the console stay maintained.
 
@@ -111,7 +111,7 @@ Configure shared credentials on **Configuration** (`/?tab=config`):
 | Connection | Purpose |
 |------------|---------|
 | **Cursor API key** | Powers agent cycles via the Cursor SDK |
-| **Massive API key** | Optional fallback for 1-hour bars |
+| **Massive API key** | Optional last-resort fallback for bars after Robinhood and Yahoo |
 | **Robinhood** | OAuth to your Agentic account |
 
 ### Cursor models (multi-agent)
@@ -134,7 +134,7 @@ Cycles use the **Cursor SDK with your API key**. Most third-party models bill **
 
 ### Market data
 
-Bars and indicators resolve **Robinhood first** (`get_equity_historicals` + `get_equity_technical_indicators`), then **Massive**, then **Yahoo**. Each symbol’s entry carries a `provider` field so you can see the source. Native Robinhood indicators replace the locally computed SMA-20 when they are present; local math stays as the fallback.
+Bars and indicators resolve **Robinhood first** (`get_equity_historicals` + `get_equity_technical_indicators`), then **Yahoo**, then **Massive** if a key is set and both earlier sources failed. Each symbol’s entry carries a `provider` field so you can see the source. Native Robinhood indicators replace the locally computed SMA-20 when they are present; local math stays as the fallback.
 
 Bots emit only the indicators their strategy text mentions (RSI, MACD, Bollinger, ATR, VWAP, EMA, SMA-50/200). Unused indicators cost nothing.
 
@@ -147,7 +147,7 @@ Copy `.env.example` to `.env`. Keys can also be saved from the Configuration tab
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CURSOR_API_KEY` | — | Cursor agent API key (required) |
-| `MASSIVE_API_KEY` | — | Massive REST API key (optional fallback) |
+| `MASSIVE_API_KEY` | — | Massive REST API key (optional last-resort after Robinhood and Yahoo) |
 | `MASSIVE_API_BASE_URL` | `https://api.massive.com` | Massive API base URL |
 | `MASSIVE_RATE_LIMIT_PER_MINUTE` | `5` | Client-side rate limit |
 | `MASSIVE_RETRY_WAIT_SECONDS` | `65` | Max wait when retrying Massive after Yahoo failure |

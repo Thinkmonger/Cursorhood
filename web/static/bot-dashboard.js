@@ -558,13 +558,16 @@ async function refresh() {
       schedText += t("scheduler.lineRunCount", { current: sched.run_count ?? 0, max: sched.max_runs });
       if (sched.max_runs_reached) schedText += t("scheduler.lineMaxRunsReached");
     }
-    schedLine.textContent = schedText;
+    if (schedLine) schedLine.textContent = schedText;
 
     document.getElementById("pause-btn").textContent = paused ? t("bot.actionResume") : t("bot.actionPause");
     document.getElementById("pause-btn").disabled = !started;
     document.getElementById("start-btn").textContent = started ? t("bot.actionStop") : t("bot.actionStart");
-    const limitsEl = document.getElementById("limits");
-    if (limitsEl) limitsEl.innerHTML = renderRiskLimitsHtml(d.limits);
+    const chips = document.getElementById("overview-limits");
+    if (chips) {
+      chips.innerHTML = renderOverviewLimitChips(d.limits);
+      chips.classList.toggle("d-none", !d.limits);
+    }
 
     renderAssetPanels(d);
 
@@ -574,6 +577,24 @@ async function refresh() {
   } catch (err) {
     toast(String(err?.message || err));
   }
+}
+
+function renderOverviewLimitChips(limits) {
+  if (!limits || typeof limits !== "object") return "";
+  const chips = [
+    [t("limits.maxOrder"), formatMoney(limits.max_order_notional_usd)],
+    [t("limits.maxDailyLoss"), formatMoney(limits.max_daily_loss_usd)],
+    [t("limits.maxOpenPositions"), limits.max_open_positions != null ? String(limits.max_open_positions) : t("common.emDash")],
+  ];
+  if (limits.market_hours_only) {
+    chips.push([t("limits.marketHoursOnly"), t("common.yes")]);
+  }
+  return chips
+    .map(
+      ([label, value]) =>
+        `<span class="badge text-bg-secondary fw-normal">${escapeHtml(label)} ${escapeHtml(String(value))}</span>`
+    )
+    .join("");
 }
 
 function showCard(id, visible) {
@@ -990,6 +1011,8 @@ function setupBotIdField() {
   }
   if (slugBtn) slugBtn.disabled = isDefault;
   if (hint) hint.classList.toggle("d-none", !isDefault);
+  const removeBtn = document.getElementById("remove-bot-btn");
+  if (removeBtn) removeBtn.disabled = isDefault;
 }
 
 async function generateBotSlug() {
@@ -1151,6 +1174,15 @@ async function toggleStart() {
   if (started) await api(`/api/bots/${encodeURIComponent(botId)}/stop`, { method: "POST", body: "{}" });
   else await api(`/api/bots/${encodeURIComponent(botId)}/start`, { method: "POST", body: "{}" });
   refresh();
+}
+
+async function removeThisBot() {
+  if (botId === "default") return toast(t("bot.idFixedDefault"));
+  const name = document.getElementById("bot-name")?.value.trim() || botId;
+  if (!confirm(t("dashboard.removeConfirm", { name }))) return;
+  await api(`/api/bots/${encodeURIComponent(botId)}`, { method: "DELETE" });
+  toast(t("dashboard.removeSuccess"));
+  location.href = "/";
 }
 
 window.onProfileGateAcknowledged = () => {
