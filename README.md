@@ -1,4 +1,4 @@
-# Robinhood Agentic Console
+# Cursorhood Agentic Trading Console
 
 Local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading). It runs [Cursor](https://cursor.com) agents against the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`, with a dashboard, risk limits, paper trading, and optional extra market data.
 
