@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Class-specific bot templates** — equities, options, and crypto each have their own `strategy.md`, limits, and cycle interval under `config/templates/`. The create-bot dialog picks a class instead of cloning the default bot.
 - **SQLite `bot_settings`** — strategy, limits, and per-bot app config persist in `data/bot.db`. Existing YAML is imported once; later edits write SQL only.
 - **OS keyring for API keys** — Cursor and Massive keys saved from the UI go to the `robinhood-agentic-bot` keyring (env / `.env` remain fallbacks). Secrets stay out of SQLite.
-- **Lightweight Charts on the bot console** — daily OHLC for a selected holding, plus an Open on TradingView link. Research already used the same library.
+- **Lightweight Charts on the bot console** — paginated 4×4 daily OHLC cards (or a list) for scanned equity/option underlyings and crypto pairs, plus TradingView links. Research already used the same library.
 - **Full Robinhood MCP catalog** — categorized registry in `src/trading/mcp_tools.py` covering all 79 live tools across account, watchlist, market-data, equity, option, crypto, scanner, and alert categories, with `asset_class_for_tool` and remote-merge for tools Robinhood ships later. Reconciled against a live `tools/list`, which turned up 22 tools absent from the support article: advanced orders, option exercise, alerts, news, analyst ratings, politician trades, SEC filings, index historicals, margin-upgrade info, and crypto onboarding.
 - **Per-bot tool filtering** — `ROBINHOOD_ENABLED_CATEGORIES` trims the proxy's `tools/list` to the bot's enabled asset classes; an equities-only bot sees 53 of 79 tools, cutting roughly 2,900 schema tokens (33%) from every cycle.
 - **Capabilities API and chips** — `GET /api/trading/capabilities` returns the live catalog grouped by category (5-minute cache); the dashboard shows which asset classes the connected account can trade.
@@ -35,13 +35,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Unfunded paper orders silently shrank** — a buy larger than paper buying power filled at whatever the cash allowed (draining the account to zero) instead of being rejected; it now rejects and names the shortfall, like a cash account.
 - **Fractional option contracts** — paper option orders sized by notional could book 1.25 contracts. Quantities are quantized per asset class, and an order that rounds to zero is rejected.
 - **Cost-less positions on ledger upgrade** — a v1 position missing `avg_cost` migrated to a zero-cost lot that later read as pure profit; such positions are now dropped with a warning, and common legacy key spellings are recognized.
-- **Option exercise** — `exercise_option` reaches the risk hook as an option write, and is denied in both live and simulation mode since exercising converts a contract into 100 shares well past the configured notional caps.
+- **Paper option fills rejected for “no quote”** — `place_option_order` sends the contract on `legs`, not `symbol`. The paper broker now reads that payload and fills limit orders at the limit premium when a live option quote is missing.
+- **Dashboard Runs stuck at 40** — overview cards counted a 40-row run sample instead of `COUNT(*)`, so every bot with 40+ cycles showed 40.
+- **Paper option limit sells rejected** — a close used a terms key (`option:UUID||None|`) while the long was stored as `option:UUID`. Option positions now key on `option_id`.
 
 ### Changed
 
+- **Manage from Runs** — the bot Runs page has a Manage button next to Dashboard that opens that bot’s overview.
 - **README / GitHub about** — explain Cursor multi-agent model choice (Composer for fast cycles, API models for heavier options/research).
 - **Market-data chain** — bars resolve Robinhood → Yahoo → Massive (last resort, including a keyring-saved Massive key). Crypto cycle prefetch no longer skips Massive.
 - **Bot Manage layout** — header actions (Run Cycle / Start / Pause), Overview holds the portfolio picture, Configuration is a two-column settings grid with one shared Save.
+- **Price-history grid** — Overview charts each scanned ticker (equity/option underlyings or crypto pairs) in a paginated 4×4 card grid or list, with Add Symbol jumping to Configuration.
 - **Differentiated default playbooks** — equity (session hours, Daily movers, SMA/RSI dip), option (long-only, DTE 21–45, Index options), and crypto (24/7, wider stops) no longer share one generic strategy.
 - **Exclusive asset class** — each bot trades equities, options, or crypto (not a mix). Watchlist items resolve by `list_id`, crypto bots read `currency_pair` entries (normalized to `BTC-USD`), an empty crypto pair list no longer blocks every pair, and mismatched order tools are denied before a paper fill.
 - **Cursor SDK integration** — dedicated `runner/cursor_agent.py` following Cursor production guidance: explicit local runtime and `api_key`, no ambient IDE settings, agent/run ID logging, startup vs mid-run error distinction, SDK bridge cleanup on shutdown.

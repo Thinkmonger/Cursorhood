@@ -238,6 +238,19 @@ def _simulate_tool(name: str, args: dict[str, Any]) -> dict[str, Any] | types.Ca
         from src.trading.crypto import normalize_pair
 
         symbol = normalize_pair(args.get("symbol") or args.get("pair") or args.get("currency_pair") or "")
+        side = str(args.get("side") or "buy").lower()
+        meta: dict[str, Any] = {}
+    elif asset_class == "option":
+        from src.trading.options import (
+            option_id_from_args,
+            option_meta_from_args,
+            option_side_from_args,
+            option_symbol_from_args,
+        )
+
+        symbol = option_symbol_from_args(args) or option_id_from_args(args)
+        side = option_side_from_args(args)
+        meta = option_meta_from_args(args)
     else:
         symbol = str(
             args.get("symbol")
@@ -245,6 +258,8 @@ def _simulate_tool(name: str, args: dict[str, Any]) -> dict[str, Any] | types.Ca
             or args.get("underlying")
             or ""
         ).upper()
+        side = str(args.get("side") or "buy").lower()
+        meta = {}
 
     run_id = _proxy_run_id()
     if "cancel_" in name.lower():
@@ -253,7 +268,7 @@ def _simulate_tool(name: str, args: dict[str, Any]) -> dict[str, Any] | types.Ca
 
     intent = OrderIntent(
         symbol=symbol,
-        side=str(args.get("side") or "buy").lower(),
+        side=side,
         asset_class=asset_class if asset_class != "none" else "equity",
         order_type=str(args.get("type") or args.get("order_type") or "market"),
         qty=_to_float(args.get("quantity") or args.get("contracts")),
@@ -265,7 +280,8 @@ def _simulate_tool(name: str, args: dict[str, Any]) -> dict[str, Any] | types.Ca
         ),
         limit_price=_to_float(args.get("limit_price") or args.get("price")),
         stop_price=_to_float(args.get("stop_price")),
-        intent_key=f"proxy:{run_id}:{symbol}:{args.get('side')}:{name}",
+        meta=meta,
+        intent_key=f"proxy:{run_id}:{symbol}:{side}:{name}",
         run_id=run_id,
     )
     if intent.qty is None and intent.notional is None:

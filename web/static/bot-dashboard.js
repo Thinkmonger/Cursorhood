@@ -5,8 +5,19 @@ let started = false;
 let configLoaded = false;
 let portfolioSparkline = null;
 let portfolioRequestSeq = 0;
-let priceChart = null;
-let priceChartBound = false;
+let lastDashboard = null;
+let lastOverview = null;
+
+const CHART_PAGE_SIZE = 16;
+const CHART_LAYOUT_KEY = "bot-chart-layout";
+let chartLayout = "cards";
+let chartPage = 0;
+let chartShowAll = false;
+let chartSymbols = [];
+let chartAssetClass = "equity";
+let chartBars = {};
+let chartInstances = [];
+let chartUniverseSeq = 0;
 
 const debouncedRefresh = debounce(() => {
   refresh();
@@ -47,6 +58,8 @@ function toggleAssetClassFields() {
   const cls = document.getElementById("asset-class")?.value || "equity";
   document.getElementById("options-block")?.classList.toggle("d-none", cls !== "option");
   document.getElementById("crypto-block")?.classList.toggle("d-none", cls !== "crypto");
+  document.getElementById("equity-symbols-block")?.classList.toggle("d-none", cls === "crypto");
+  document.getElementById("crypto-pairs-block")?.classList.toggle("d-none", cls !== "crypto");
 }
 
 function toggleSymbolSourceFields() {
@@ -68,7 +81,7 @@ function parseOptionalMoney(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function showTab(tab) {
+function showTab(tab, opts = {}) {
   const overview = tab === "overview";
   document.getElementById("panel-overview").classList.toggle("d-none", !overview);
   document.getElementById("panel-configuration").classList.toggle("d-none", overview);
@@ -79,7 +92,16 @@ function showTab(tab) {
   if (tab === "config") url.searchParams.set("tab", "config");
   else url.searchParams.delete("tab");
   history.replaceState(null, "", url.pathname + url.search);
-  if (tab === "config" && !configLoaded) loadBotConfig();
+  if (tab === "overview") {
+    requestAnimationFrame(() => renderChartBoard());
+  }
+  if (tab === "config") {
+    const after = () => {
+      if (opts.focusTicker) focusConfigTickerField();
+    };
+    if (!configLoaded) loadBotConfig().then(after);
+    else after();
+  }
 }
 
 function kpiCard(title, value, sub, icon) {
@@ -194,12 +216,23 @@ function tradingViewSymbol(symbol) {
   return String(symbol || "").toUpperCase().replace(/-/g, "");
 }
 
-function collectChartSymbols(...groups) {
+function chartCssId(symbol) {
+  return String(symbol || "").replace(/[^A-Za-z0-9]/g, "_");
+}
+
+function normalizeChartSymbol(raw) {
+  return String(raw || "").trim().toUpperCase();
+}
+
+function mergeUniqueSymbols(...groups) {
   const seen = new Set();
   const out = [];
   for (const group of groups) {
-    for (const row of group || []) {
-      const symbol = String(row.symbol || row.pair || "").trim().toUpperCase();
+    for (const item of group || []) {
+      const symbol =
+        typeof item === "string"
+          ? normalizeChartSymbol(item)
+          : normalizeChartSymbol(item?.symbol || item?.pair || item?.underlying);
       if (symbol && !seen.has(symbol)) {
         seen.add(symbol);
         out.push(symbol);
@@ -209,77 +242,193 @@ function collectChartSymbols(...groups) {
   return out;
 }
 
-function bindPriceChartSelect() {
-  if (priceChartBound) return;
-  const sel = document.getElementById("price-chart-symbol");
-  if (!sel) return;
-  sel.addEventListener("change", () => loadBotPriceChart(sel.value));
-  priceChartBound = true;
+function collectFallbackChartSymbols(dashboard, overview) {
+  const groups = [];
+  if (dashboard) {
+    groups.push(dashboard.symbol_source?.symbols);
+    groups.push((dashboard.watchlists || []).flatMap((w) => w.symbols || []));
+    groups.push(dashboard.option_positions);
+    groups.push(dashboard.crypto_positions);
+    groups.push(dashboard.paper?.open_orders);
+    groups.push(dashboard.paper?.recent_fills);
+  }
+  if (overview) {
+    const live = overview.live || {};
+    groups.push(live.holdings || overview.holdings);
+    groups.push(overview.simulation?.holdings);
+  }
+  return mergeUniqueSymbols(...groups);
 }
 
-function syncPriceChartSymbols(symbols) {
-  const sel = document.getElementById("price-chart-symbol");
-  const el = document.getElementById("bot-price-chart");
-  bindPriceChartSelect();
-  if (!sel || !el) return;
-  if (!symbols.length) {
-    sel.innerHTML = "";
-    if (priceChart) {
-      priceChart.remove();
-      priceChart = null;
+function disposeChartInstances() {
+  for (const chart of chartInstances) {
+    try {
+      chart.remove();
+    } catch {
+      /* already gone */
     }
-    el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
-    const link = document.getElementById("bot-tv-link");
-    if (link) link.hidden = true;
-    return;
   }
-  const previous = sel.value;
-  sel.innerHTML = symbols
-    .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)
-    .join("");
-  const next = symbols.includes(previous) ? previous : symbols[0];
-  sel.value = next;
-  loadBotPriceChart(next);
+  chartInstances = [];
 }
 
-async function loadBotPriceChart(symbol) {
-  const el = document.getElementById("bot-price-chart");
-  const link = document.getElementById("bot-tv-link");
-  if (!el || !symbol) return;
-  if (link) {
-    const tv = tradingViewSymbol(symbol);
-    link.href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}`;
-    link.textContent = t("portfolio.openTradingView");
-    link.hidden = false;
+function barChangePct(bars) {
+  if (!bars || bars.length < 2) return null;
+  const first = Number(bars[0].close);
+  const last = Number(bars[bars.length - 1].close);
+  if (!first || Number.isNaN(first) || Number.isNaN(last)) return null;
+  return ((last - first) / first) * 100;
+}
+
+function addSymbolLabel() {
+  return chartAssetClass === "crypto" ? t("portfolio.chartAddPair") : t("portfolio.chartAddSymbol");
+}
+
+function configTickerFieldId() {
+  const cls = document.getElementById("asset-class")?.value || chartAssetClass || "equity";
+  return cls === "crypto" ? "allowed-crypto-pairs" : "symbols";
+}
+
+function focusConfigTicker() {
+  showTab("config", { focusTicker: true });
+}
+
+function focusConfigTickerField() {
+  toggleAssetClassFields();
+  const el = document.getElementById(configTickerFieldId());
+  document.getElementById("universe-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (el) {
+    el.focus();
+    if (typeof el.select === "function") el.select();
   }
+}
+
+function visibleChartSymbols() {
+  if (chartShowAll) return chartSymbols;
+  const start = chartPage * CHART_PAGE_SIZE;
+  return chartSymbols.slice(start, start + CHART_PAGE_SIZE);
+}
+
+function setChartLayout(layout) {
+  chartLayout = layout === "list" ? "list" : "cards";
   try {
-    const report = await api(`/api/research/charts/${encodeURIComponent(symbol)}`);
-    const bars = report.bars || [];
-    if (!bars.length || typeof LightweightCharts === "undefined") {
-      el.innerHTML = `<p class="text-secondary small mb-0">${escapeHtml(t("research.noData"))}</p>`;
-      if (priceChart) {
-        priceChart.remove();
-        priceChart = null;
-      }
-      return;
-    }
-    el.innerHTML = "";
-    if (priceChart) {
-      priceChart.remove();
-      priceChart = null;
-    }
-    priceChart = LightweightCharts.createChart(el, {
-      layout: { background: { color: "transparent" }, textColor: "#8b9cb3" },
-      grid: {
-        vertLines: { color: "rgba(255,255,255,0.06)" },
-        horzLines: { color: "rgba(255,255,255,0.06)" },
-      },
-      rightPriceScale: { borderColor: "#2d3a4d" },
-      timeScale: { borderColor: "#2d3a4d", timeVisible: false },
-      width: el.clientWidth || el.parentElement?.clientWidth || 640,
-      height: 280,
+    sessionStorage.setItem(CHART_LAYOUT_KEY, chartLayout);
+  } catch {
+    /* private mode */
+  }
+  document.getElementById("chart-layout-cards")?.classList.toggle("active", chartLayout === "cards");
+  document.getElementById("chart-layout-list")?.classList.toggle("active", chartLayout === "list");
+  renderChartBoard();
+}
+
+function shiftChartPage(delta) {
+  const pages = Math.max(1, Math.ceil(chartSymbols.length / CHART_PAGE_SIZE) || 1);
+  chartPage = Math.min(pages - 1, Math.max(0, chartPage + delta));
+  renderChartBoard();
+  loadVisibleChartBars();
+}
+
+function toggleChartShowAll() {
+  chartShowAll = !chartShowAll;
+  chartPage = 0;
+  renderChartBoard();
+  loadVisibleChartBars();
+}
+
+function restoreChartLayout() {
+  try {
+    const saved = sessionStorage.getItem(CHART_LAYOUT_KEY);
+    if (saved === "list" || saved === "cards") chartLayout = saved;
+  } catch {
+    /* ignore */
+  }
+  document.getElementById("chart-layout-cards")?.classList.toggle("active", chartLayout === "cards");
+  document.getElementById("chart-layout-list")?.classList.toggle("active", chartLayout === "list");
+}
+
+function chartAddCellHtml() {
+  return `<button type="button" class="bot-chart-cell is-add" onclick="focusConfigTicker()">
+    <i class="bi bi-plus-lg fs-4"></i>
+    <span class="small">${escapeHtml(addSymbolLabel())}</span>
+  </button>`;
+}
+
+function chartListAddHtml() {
+  return `<button type="button" class="bot-chart-list-row bot-chart-list-add w-100 text-start bg-transparent" onclick="focusConfigTicker()">
+    <i class="bi bi-plus-lg"></i>
+    <span>${escapeHtml(addSymbolLabel())}</span>
+  </button>`;
+}
+
+function chartCardHtml(symbol) {
+  const bars = chartBars[symbol]?.bars || [];
+  const chg = barChangePct(bars);
+  const chgCls = chg == null ? "text-secondary" : chg >= 0 ? "text-success" : "text-danger";
+  const chgTxt = chg == null ? t("common.emDash") : pct(chg);
+  const tv = tradingViewSymbol(symbol);
+  const sid = chartCssId(symbol);
+  const entry = chartBars[symbol];
+  let body = "";
+  if (!entry) body = `<p class="text-secondary small px-2 mb-0">…</p>`;
+  else if (!bars.length) body = `<p class="text-secondary small px-2 mb-0">${escapeHtml(t("portfolio.chartNoData"))}</p>`;
+  return `<div class="bot-chart-cell">
+    <div class="bot-chart-cell-head">
+      <a class="text-decoration-none text-reset fw-semibold small" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}" target="_blank" rel="noopener">${escapeHtml(symbol)}</a>
+      <span class="small ${chgCls}">${escapeHtml(chgTxt)}</span>
+    </div>
+    <div class="bot-chart-mini" id="chart-mini-${sid}">${body}</div>
+  </div>`;
+}
+
+function chartListRowHtml(symbol) {
+  const bars = chartBars[symbol]?.bars || [];
+  const chg = barChangePct(bars);
+  const chgCls = chg == null ? "text-secondary" : chg >= 0 ? "text-success" : "text-danger";
+  const chgTxt = chg == null ? t("common.emDash") : pct(chg);
+  const last = bars.length ? money(bars[bars.length - 1].close) : t("common.emDash");
+  const tv = tradingViewSymbol(symbol);
+  const sid = chartCssId(symbol);
+  return `<div class="bot-chart-list-row">
+    <div class="bot-chart-spark" id="chart-spark-${sid}"></div>
+    <a class="text-decoration-none text-reset fw-semibold" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}" target="_blank" rel="noopener">${escapeHtml(symbol)}</a>
+    <span class="ms-auto small">${escapeHtml(last)}</span>
+    <span class="small ${chgCls}">${escapeHtml(chgTxt)}</span>
+  </div>`;
+}
+
+function mountMiniChart(elId, bars, opts = {}) {
+  const el = document.getElementById(elId);
+  if (!el || !bars?.length || typeof LightweightCharts === "undefined") return;
+  el.innerHTML = "";
+  const height = opts.height || 140;
+  const width = el.clientWidth || el.parentElement?.clientWidth || 160;
+  if (width < 8) return;
+  const chart = LightweightCharts.createChart(el, {
+    layout: { background: { color: "transparent" }, textColor: "#8b9cb3" },
+    grid: {
+      vertLines: { visible: false },
+      horzLines: { color: "rgba(255,255,255,0.05)" },
+    },
+    rightPriceScale: { visible: !opts.spark, borderVisible: false },
+    timeScale: { visible: false, borderVisible: false },
+    width,
+    height,
+    handleScroll: false,
+    handleScale: false,
+  });
+  if (opts.spark) {
+    const last = Number(bars[bars.length - 1]?.close);
+    const first = Number(bars[0]?.close);
+    const up = !(first && last < first);
+    const series = chart.addLineSeries({
+      color: up ? "#00c805" : "#ff5a5f",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
     });
-    const series = priceChart.addCandlestickSeries({
+    series.setData(bars.map((b) => ({ time: b.time, value: b.close })));
+  } else {
+    const series = chart.addCandlestickSeries({
       upColor: "#00c805",
       downColor: "#ff5a5f",
       borderUpColor: "#00c805",
@@ -288,11 +437,143 @@ async function loadBotPriceChart(symbol) {
       wickDownColor: "#ff5a5f",
     });
     series.setData(bars);
-    priceChart.timeScale().fitContent();
-  } catch (err) {
-    el.innerHTML = `<p class="text-danger small mb-0">${escapeHtml(String(err.message || err))}</p>`;
   }
+  chart.timeScale().fitContent();
+  chartInstances.push(chart);
 }
+
+function updateChartPager() {
+  const pager = document.getElementById("bot-chart-pager");
+  const pages = Math.max(1, Math.ceil(chartSymbols.length / CHART_PAGE_SIZE) || 1);
+  const showPager = chartShowAll || chartSymbols.length > CHART_PAGE_SIZE;
+  if (pager) {
+    pager.classList.toggle("d-none", !showPager);
+    pager.classList.toggle("d-flex", showPager);
+  }
+  const pageLabel = document.getElementById("chart-page-label");
+  if (pageLabel) {
+    pageLabel.textContent = t("portfolio.chartPageOf", {
+      page: chartShowAll ? 1 : chartPage + 1,
+      pages: chartShowAll ? 1 : pages,
+    });
+  }
+  const prev = document.getElementById("chart-prev");
+  const next = document.getElementById("chart-next");
+  if (prev) prev.disabled = chartShowAll || chartPage <= 0;
+  if (next) next.disabled = chartShowAll || chartPage >= pages - 1;
+  const showAllBtn = document.getElementById("chart-show-all");
+  if (showAllBtn) {
+    showAllBtn.textContent = chartShowAll ? t("portfolio.chartShowPages") : t("portfolio.chartShowAll");
+  }
+  const addBtn = document.getElementById("chart-add-symbol");
+  if (addBtn) addBtn.textContent = addSymbolLabel();
+}
+
+function renderChartBoard() {
+  const grid = document.getElementById("bot-chart-grid");
+  const list = document.getElementById("bot-chart-list");
+  if (!grid || !list) return;
+  disposeChartInstances();
+
+  const cards = chartLayout === "cards";
+  grid.classList.toggle("d-none", !cards);
+  list.classList.toggle("d-none", cards);
+  updateChartPager();
+
+  const visible = visibleChartSymbols();
+  if (cards) {
+    const cells = visible.map((symbol) => chartCardHtml(symbol));
+    const roomForAdd = visible.length < CHART_PAGE_SIZE;
+    if (roomForAdd || !chartSymbols.length) cells.push(chartAddCellHtml());
+    const padCount = Math.max(0, CHART_PAGE_SIZE - cells.length);
+    for (let i = 0; i < padCount; i += 1) {
+      cells.push(`<div class="bot-chart-cell is-empty" aria-hidden="true"></div>`);
+    }
+    grid.innerHTML = cells.join("");
+    requestAnimationFrame(() => {
+      for (const symbol of visible) {
+        mountMiniChart(`chart-mini-${chartCssId(symbol)}`, chartBars[symbol]?.bars);
+      }
+    });
+    return;
+  }
+
+  const rows = visible.map((symbol) => chartListRowHtml(symbol));
+  rows.push(chartListAddHtml());
+  list.innerHTML = rows.join("");
+  requestAnimationFrame(() => {
+    for (const symbol of visible) {
+      mountMiniChart(`chart-spark-${chartCssId(symbol)}`, chartBars[symbol]?.bars, {
+        height: 40,
+        spark: true,
+      });
+    }
+  });
+}
+
+async function loadVisibleChartBars() {
+  const symbols = visibleChartSymbols();
+  const missing = symbols.filter((s) => !chartBars[s]);
+  if (!missing.length) return;
+  for (let i = 0; i < missing.length; i += CHART_PAGE_SIZE) {
+    const chunk = missing.slice(i, i + CHART_PAGE_SIZE);
+    try {
+      const data = await api("/api/research/charts", {
+        method: "POST",
+        body: JSON.stringify({ symbols: chunk, interval: "1d" }),
+      });
+      const rows = data.symbols || {};
+      for (const symbol of chunk) {
+        chartBars[symbol] = rows[symbol] || { ok: false, error: "No bars" };
+      }
+    } catch (err) {
+      for (const symbol of chunk) {
+        if (!chartBars[symbol]) {
+          chartBars[symbol] = { ok: false, error: String(err.message || err) };
+        }
+      }
+    }
+  }
+  renderChartBoard();
+}
+
+async function loadChartUniverse() {
+  const seq = ++chartUniverseSeq;
+  let resolved = [];
+  let assetClass = chartAssetClass;
+  try {
+    const data = await api(`/api/bots/${encodeURIComponent(botId)}/universe`);
+    if (seq !== chartUniverseSeq) return;
+    assetClass = data.asset_class || "equity";
+    resolved = data.symbols || [];
+  } catch {
+    if (seq !== chartUniverseSeq) return;
+  }
+  const fallback = collectFallbackChartSymbols(lastDashboard, lastOverview);
+  const next = mergeUniqueSymbols(resolved.length ? resolved : fallback);
+  const same =
+    assetClass === chartAssetClass &&
+    next.length === chartSymbols.length &&
+    next.every((s, i) => s === chartSymbols[i]);
+  chartAssetClass = assetClass;
+  if (!same) {
+    const dropped = new Set(next);
+    for (const key of Object.keys(chartBars)) {
+      if (!dropped.has(key)) delete chartBars[key];
+    }
+    chartSymbols = next;
+    const pages = Math.max(1, Math.ceil(chartSymbols.length / CHART_PAGE_SIZE) || 1);
+    if (chartPage >= pages) chartPage = 0;
+  }
+  const needBars = visibleChartSymbols().some((s) => !chartBars[s]);
+  if (same && !needBars) return;
+  renderChartBoard();
+  await loadVisibleChartBars();
+}
+
+const scheduleChartUniverse = debounce(() => {
+  loadChartUniverse();
+}, 250);
 
 function renderHoldingsBlock(holdings, tbodyId, emptyId, wrapId) {
   const tbody = document.getElementById(tbodyId);
@@ -400,7 +681,8 @@ function renderPortfolioOverview(overview) {
     }
 
     renderHoldingsBlock(liveHoldings, "holdings-body", "holdings-empty", "holdings-wrap");
-    syncPriceChartSymbols(collectChartSymbols(liveHoldings, simulation?.holdings || []));
+    lastOverview = overview;
+    scheduleChartUniverse();
 
     const simHoldingsSection = document.getElementById("sim-holdings-section");
     if (simMode && simulation) {
@@ -570,6 +852,8 @@ async function refresh() {
     }
 
     renderAssetPanels(d);
+    lastDashboard = d;
+    scheduleChartUniverse();
 
     const list = document.getElementById("runs");
     list.innerHTML = "";
@@ -1194,6 +1478,7 @@ function bootstrapDashboard() {
   document.getElementById("agents-link").href = botPath(botId, "agents");
   document.getElementById("all-runs-link").href = botPath(botId, "agents");
   setupBotIdField();
+  restoreChartLayout();
 
   document.querySelectorAll("#bot-tabs .nav-link").forEach((btn) => {
     btn.addEventListener("click", () => showTab(btn.dataset.tab));
@@ -1202,6 +1487,15 @@ function bootstrapDashboard() {
   const initialTab =
     new URLSearchParams(location.search).get("tab") === "config" ? "config" : "overview";
   showTab(initialTab);
+
+  window.addEventListener(
+    "resize",
+    debounce(() => {
+      if (!document.getElementById("panel-overview")?.classList.contains("d-none")) {
+        renderChartBoard();
+      }
+    }, 200)
+  );
 
   connectWs((msg) => {
     if (msg.type === "agent_event" && msg.bot_id === botId) debouncedRefresh();

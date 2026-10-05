@@ -11,6 +11,7 @@ const activityScroll = document.getElementById("activity-scroll");
 let autoScroll = true;
 
 document.getElementById("back-dash").href = "/";
+document.getElementById("manage-bot").href = botPath(botId);
 
 whenI18nReady(() => {
   api(`/api/bots/${encodeURIComponent(botId)}`)

@@ -63,8 +63,7 @@ def _today_iso_prefix() -> str:
 def bot_stats(bot_id: str, *, run_limit: int = 500, light: bool = False) -> dict[str, Any]:
     store = Store()
     runs = store.get_runs(limit=run_limit, bot_id=bot_id)
-
-    total = len(runs)
+    total = store.count_runs(bot_id)
     finished = sum(1 for r in runs if r.get("status") == "finished")
     errors = sum(1 for r in runs if r.get("status") == "error")
     runs_today = sum(

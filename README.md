@@ -15,7 +15,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 - Trade from a **static symbol list**, one of your Robinhood **watchlists**, a popular list, or a saved **scan**.
 - Pick **one asset class per bot** — equities, single-leg options, or crypto. Crypto bots keep cycling 24/7 instead of sleeping at the equity close.
 - Research symbols from `/research` (search, candlestick price history via TradingView Lightweight Charts, fundamentals, financials, earnings, news, ratings, scanners, watchlists) without stuffing that into every cycle prompt.
-- Watch live activity, run history, portfolio sparklines, and per-bot statistics.
+- Watch live activity, run history, a paginated 4×4 price-history grid (or list) for each bot’s scanned tickers, portfolio sparklines, and per-bot statistics.
 
 Trades never bypass `.cursor/hooks/check_trade.py`. Uncertain setups skip the trade.
 

@@ -50,9 +50,20 @@ def merge_quotes(existing: Any | None, extra: Any | None) -> Any | None:
     return {"data": {**existing_data, **extra_data, "results": merged}}
 
 
-def resolve_price(symbol: str, asset_class: str, quotes_payload: Any | None) -> float | None:
+def resolve_price(
+    symbol: str,
+    asset_class: str,
+    quotes_payload: Any | None,
+    meta: dict[str, Any] | None = None,
+) -> float | None:
     """Best available price for a paper fill, fetching live if the snapshot lacks it."""
-    ticker = str(symbol).upper()
+    ticker = str(symbol or "").upper()
+
+    if asset_class == OPTION:
+        option_id = str((meta or {}).get("option_id") or ticker).strip()
+        if not option_id:
+            return None
+        return _fetch_sync(_fetch_option, option_id)
     if not ticker:
         return None
 
@@ -69,8 +80,6 @@ def resolve_price(symbol: str, asset_class: str, quotes_payload: Any | None) -> 
         if price is not None:
             return price
         return _fetch_sync(_fetch_crypto, ticker)
-    if asset_class == OPTION:
-        return _fetch_sync(_fetch_option, ticker)
     return equity_price(quotes_payload, ticker)
 
 

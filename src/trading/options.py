@@ -196,6 +196,83 @@ def compact_chain(
     return out
 
 
+def first_option_leg(args: dict[str, Any]) -> dict[str, Any]:
+    """Robinhood `place_option_order` puts the contract on `legs`, not top-level `symbol`."""
+    legs = args.get("legs")
+    if isinstance(legs, list):
+        for row in legs:
+            if isinstance(row, dict):
+                return row
+    if isinstance(legs, dict):
+        return legs
+    return {}
+
+
+def option_id_from_args(args: dict[str, Any]) -> str:
+    leg = first_option_leg(args)
+    raw = (
+        args.get("option_id")
+        or args.get("instrument_id")
+        or leg.get("option_id")
+        or leg.get("instrument_id")
+        or leg.get("id")
+        or leg.get("option")
+        or ""
+    )
+    text = str(raw).strip()
+    if "/" in text:
+        text = text.rstrip("/").split("/")[-1]
+    return text
+
+
+def option_symbol_from_args(args: dict[str, Any]) -> str:
+    leg = first_option_leg(args)
+    return str(
+        args.get("symbol")
+        or args.get("chain_symbol")
+        or args.get("underlying")
+        or args.get("instrument")
+        or leg.get("symbol")
+        or leg.get("chain_symbol")
+        or leg.get("underlying")
+        or ""
+    ).upper()
+
+
+def option_side_from_args(args: dict[str, Any]) -> str:
+    leg = first_option_leg(args)
+    return str(
+        args.get("side")
+        or args.get("direction")
+        or leg.get("side")
+        or leg.get("direction")
+        or "buy"
+    ).lower()
+
+
+def option_meta_from_args(args: dict[str, Any]) -> dict[str, Any]:
+    leg = first_option_leg(args)
+    raw_type = str(args.get("option_type") or leg.get("option_type") or "").lower()
+    if raw_type not in ("call", "put"):
+        cand = str(leg.get("type") or "").lower()
+        raw_type = cand if cand in ("call", "put") else ""
+    return {
+        "option_id": option_id_from_args(args) or None,
+        "expiry": str(
+            args.get("expiration_date")
+            or args.get("expiry")
+            or leg.get("expiration_date")
+            or leg.get("expiry")
+            or ""
+        )[:10]
+        or None,
+        "strike": _to_float(
+            args.get("strike_price") or args.get("strike") or leg.get("strike_price") or leg.get("strike")
+        ),
+        "type": raw_type or None,
+    }
+
+
 def option_order_notional(args: dict[str, Any]) -> float | None:
     """Premium x 100 x contracts for a place_option_order argument payload."""
     qty = _to_float(args.get("quantity") or args.get("contracts") or args.get("qty"))
@@ -211,8 +288,9 @@ def option_order_notional(args: dict[str, Any]) -> float | None:
 
 
 def option_side_is_sell(args: dict[str, Any]) -> bool:
-    side = str(args.get("side") or args.get("direction") or "").lower()
+    side = option_side_from_args(args)
     if side in ("sell", "sell_to_open", "sell_to_close", "short"):
         return True
-    position_effect = str(args.get("position_effect") or "").lower()
+    leg = first_option_leg(args)
+    position_effect = str(args.get("position_effect") or leg.get("position_effect") or "").lower()
     return side == "sell" or (position_effect == "open" and side.startswith("sell"))

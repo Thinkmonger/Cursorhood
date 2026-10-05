@@ -27,7 +27,10 @@
     <div id="profile-gate-banner" class="d-none"></div>
     <div class="agents-toolbar rh-card">
       <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center gap-3">
-        <a id="back-dash" class="btn btn-outline-secondary btn-sm" href="/"><i class="bi bi-arrow-left"></i> <span data-i18n="nav.backToDashboard">Dashboard</span></a>
+        <div class="d-flex gap-2">
+          <a id="back-dash" class="btn btn-outline-secondary btn-sm" href="/"><i class="bi bi-arrow-left"></i> <span data-i18n="nav.backToDashboard">Dashboard</span></a>
+          <a id="manage-bot" class="btn btn-outline-secondary btn-sm" href="#"><i class="bi bi-sliders"></i> <span data-i18n="bot.actionManage">Manage</span></a>
+        </div>
         <span id="bot-label" class="text-secondary small"></span>
         <span id="agent-state" class="badge rounded-pill text-bg-secondary" data-i18n="agents.stateIdle">idle</span>
         <div class="d-flex gap-2">
@@ -91,6 +94,6 @@
   <script src="/static/i18n.js?v=20260529l"></script>
   <script src="/static/app.js?v=20261004a"></script>
   <script src="/static/footer.js?v=20260529l"></script>
-  <script src="/static/agents.js?v=20261004a"></script>
+  <script src="/static/agents.js?v=20261005e"></script>
 </body>
 </html>

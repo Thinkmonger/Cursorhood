@@ -106,10 +106,13 @@ def simulate_order(tool_name: str, args: dict, asset_class: str, limits: dict) -
         deny("Simulation mode — option exercise is not modeled by the paper broker.")
     try:
         from src.simulation.ledger import OrderIntent, cancel_paper_orders, submit_paper_order
+        from src.trading.options import option_meta_from_args, option_side_from_args
 
         bot_id = active_bot_id()
         run_id = active_run_id()
         symbol = order_symbol(args, asset_class)
+        side = option_side_from_args(args) if asset_class == "option" else str(args.get("side") or "buy").lower()
+        meta = option_meta_from_args(args) if asset_class == "option" else {}
 
         if "cancel_" in tool_name.lower():
             cancelled = cancel_paper_orders(bot_id, order_id=args.get("order_id"), symbol=symbol or None)
@@ -120,7 +123,7 @@ def simulate_order(tool_name: str, args: dict, asset_class: str, limits: dict) -
 
         intent = OrderIntent(
             symbol=symbol,
-            side=str(args.get("side") or "buy").lower(),
+            side=side,
             asset_class=asset_class,
             order_type=args.get("type") or args.get("order_type") or "market",
             qty=_optional_float(args.get("quantity") or args.get("contracts")),
@@ -132,8 +135,8 @@ def simulate_order(tool_name: str, args: dict, asset_class: str, limits: dict) -
             ),
             limit_price=_optional_float(args.get("limit_price") or args.get("price")),
             stop_price=_optional_float(args.get("stop_price")),
-            meta=option_meta(args) if asset_class == "option" else {},
-            intent_key=f"hook:{run_id}:{symbol}:{args.get('side')}:{tool_name}",
+            meta=meta,
+            intent_key=f"hook:{run_id}:{symbol}:{side}:{tool_name}",
             run_id=run_id,
         )
         if intent.qty is None and intent.notional is None:
@@ -164,6 +167,10 @@ def order_symbol(args: dict, asset_class: str) -> str:
         return normalize_pair(
             args.get("symbol") or args.get("pair") or args.get("currency_pair") or ""
         )
+    if asset_class == "option":
+        from src.trading.options import option_id_from_args, option_symbol_from_args
+
+        return option_symbol_from_args(args) or option_id_from_args(args)
     return str(
         args.get("symbol")
         or args.get("chain_symbol")
@@ -171,14 +178,6 @@ def order_symbol(args: dict, asset_class: str) -> str:
         or args.get("instrument")
         or ""
     ).upper()
-
-
-def option_meta(args: dict) -> dict:
-    return {
-        "expiry": str(args.get("expiration_date") or args.get("expiry") or "")[:10] or None,
-        "strike": _optional_float(args.get("strike_price") or args.get("strike")),
-        "type": str(args.get("option_type") or args.get("type") or "").lower() or None,
-    }
 
 
 def configured_asset_class(limits: dict) -> str:

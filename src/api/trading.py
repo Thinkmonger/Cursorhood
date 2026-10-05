@@ -82,6 +82,53 @@ async def research_search(q: str, limit: int = 10) -> dict[str, Any]:
     return {"ok": True, "query": q, "results": await search_symbols(q, limit=limit)}
 
 
+class ChartsBatchBody(BaseModel):
+    symbols: list[str] = Field(default_factory=list)
+    interval: str = "1d"
+
+
+def _chart_tickers(raw: list[str], *, cap: int = 16) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        ticker = str(item or "").strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        out.append(ticker)
+        if len(out) >= cap:
+            break
+    return out
+
+
+@research_router.post("/charts")
+async def research_charts_batch(body: ChartsBatchBody) -> dict[str, Any]:
+    from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars
+    from src.trading.research import compact_ohlc_bars
+
+    tickers = _chart_tickers(body.symbols)
+    if not tickers:
+        return {"ok": True, "interval": "1d", "symbols": {}}
+    hourly = body.interval in ("1h", "hour", "hourly")
+    if hourly:
+        payload = await fetch_hourly_bars(tickers)
+    else:
+        payload = await fetch_daily_bars(tickers, max_bars=90, yahoo_range="6mo")
+    symbols: dict[str, Any] = {}
+    rows = payload.get("symbols") or {}
+    for ticker in tickers:
+        entry = rows.get(ticker) or {}
+        chart = compact_ohlc_bars(entry if isinstance(entry, dict) else {})
+        if chart:
+            symbols[ticker] = {"ok": True, **chart}
+        else:
+            symbols[ticker] = {
+                "ok": False,
+                "error": entry.get("error") if isinstance(entry, dict) else "No bars",
+            }
+    return {"ok": True, "interval": payload.get("interval"), "symbols": symbols}
+
+
 @research_router.get("/charts/{symbol}")
 async def research_chart(symbol: str, interval: str = "1d") -> dict[str, Any]:
     from src.trading.historical_bars import fetch_daily_bars, fetch_hourly_bars

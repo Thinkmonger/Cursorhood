@@ -32,11 +32,17 @@ def quantize(asset_class: str, qty: float) -> float:
 def position_key(asset_class: str, symbol: str, meta: dict[str, Any] | None = None) -> str:
     """Stable identity for a position. Option contracts key on their full terms."""
     symbol = str(symbol).upper()
-    if asset_class == OPTION and meta:
+    if asset_class == OPTION:
+        meta = meta or {}
+        option_id = str(meta.get("option_id") or "").strip().upper()
+        if option_id:
+            return f"{OPTION}:{option_id}"
         expiry = str(meta.get("expiry") or "")[:10]
         strike = meta.get("strike")
         option_type = str(meta.get("type") or "").lower()
-        return f"{OPTION}:{symbol}|{expiry}|{strike}|{option_type}"
+        if expiry and strike is not None and option_type:
+            return f"{OPTION}:{symbol}|{expiry}|{strike}|{option_type}"
+        return f"{OPTION}:{symbol}"
     return f"{asset_class}:{symbol}"
 
 

@@ -154,6 +154,8 @@ class PaperBroker:
             return SubmitResult(True, "duplicate", duplicate=True)
 
         price = intent.reference_price or self._price_for(intent, quotes)
+        if (price is None or price <= 0) and intent.limit_price and intent.limit_price > 0:
+            price = intent.limit_price
         if price is None or price <= 0:
             return self._reject(intent, "No paper quote available for the symbol")
 
@@ -178,7 +180,9 @@ class PaperBroker:
         for order in self.ledger.get("orders") or []:
             if order.get("status") not in (QUEUED, PARTIALLY_FILLED):
                 continue
-            price = self._quote_price(order.get("symbol", ""), order.get("asset_class"), quotes)
+            price = self._quote_price(
+                order.get("symbol", ""), order.get("asset_class"), quotes, meta=order.get("meta")
+            )
             if price is None or price <= 0:
                 continue
             if not is_triggered(order, price):
@@ -384,12 +388,18 @@ class PaperBroker:
         return True
 
     def _price_for(self, intent: OrderIntent, quotes: Any | None) -> float | None:
-        return self._quote_price(intent.symbol, intent.asset_class, quotes)
+        return self._quote_price(intent.symbol, intent.asset_class, quotes, meta=intent.meta)
 
-    def _quote_price(self, symbol: str, asset_class: Any, quotes: Any | None) -> float | None:
+    def _quote_price(
+        self,
+        symbol: str,
+        asset_class: Any,
+        quotes: Any | None,
+        meta: dict[str, Any] | None = None,
+    ) -> float | None:
         from src.simulation.quotes import resolve_price
 
-        return resolve_price(symbol, str(asset_class or pos.EQUITY), quotes)
+        return resolve_price(symbol, str(asset_class or pos.EQUITY), quotes, meta=meta)
 
     def append_series(self, ts: str, quotes: Any | None) -> None:
         total = self.total_value(quotes)
@@ -401,7 +411,10 @@ class PaperBroker:
         total = float(self.ledger.get("cash") or 0)
         for position in (self.ledger.get("positions") or {}).values():
             price = self._quote_price(
-                str(position.get("symbol")), position.get("asset_class"), quotes
+                str(position.get("symbol")),
+                position.get("asset_class"),
+                quotes,
+                meta=position.get("meta"),
             )
             total += pos.market_value(position, price)
         return total

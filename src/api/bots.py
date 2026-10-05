@@ -231,6 +231,40 @@ async def active_run(bot_id: str) -> dict[str, Any]:
     return {"run": store.get_active_run(bot_id=bot_id), "bot_id": bot_id}
 
 
+@router.get("/{bot_id}/universe")
+async def bot_universe(bot_id: str) -> dict[str, Any]:
+    """Resolved watchlist / static tickers this bot scans (equity, option underlyings, or crypto pairs)."""
+    from src.settings.service import SettingsService
+    from src.trading.watchlists import resolve_symbols
+
+    store = Store()
+    if not store.get_bot(bot_id):
+        raise HTTPException(status_code=404, detail="Bot not found")
+    limits = SettingsService(bot_id).read_limits()
+    asset_class = str(getattr(limits, "asset_class", None) or "equity").strip().lower()
+    if asset_class not in ("equity", "option", "crypto"):
+        asset_class = "crypto" if limits.crypto_enabled else "option" if limits.options_enabled else "equity"
+    static = (
+        list(limits.allowed_crypto_pairs or [])
+        if asset_class == "crypto"
+        else list(limits.allowed_symbols or [])
+    )
+    symbols, origin = await resolve_symbols(
+        source=limits.symbol_source,
+        ref=limits.symbol_source_ref,
+        static_symbols=static,
+        limit=limits.symbol_source_limit,
+        asset_class=asset_class,
+    )
+    return {
+        "ok": True,
+        "bot_id": bot_id,
+        "asset_class": asset_class,
+        "origin": origin,
+        "symbols": symbols,
+    }
+
+
 @router.get("/{bot_id}/portfolio")
 async def bot_portfolio(bot_id: str) -> dict[str, Any]:
     from src.stats.portfolio import build_portfolio_overview
