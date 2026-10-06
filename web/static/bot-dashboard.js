@@ -1084,10 +1084,11 @@ function makeModelOption(entry) {
   return option;
 }
 
-function ensureModelOption(select, modelId) {
+function ensureModelOption(select, modelId, allowedIds) {
   if (!select || !modelId) return;
   const exists = Array.from(select.options).some((opt) => opt.value === modelId);
   if (exists) return;
+  if (Array.isArray(allowedIds) && allowedIds.length && !allowedIds.includes(modelId)) return;
   const option = makeModelOption({
     id: modelId,
     label: t("bot.modelCurrentOption", { id: modelId }),
@@ -1140,7 +1141,7 @@ function fillModelSelect(data, selectedId) {
   if (!select.options.length && data?.models) {
     (data.models || []).forEach((id) => select.appendChild(makeModelOption(id)));
   }
-  ensureModelOption(select, wanted);
+  ensureModelOption(select, wanted, data?.models);
   if (wanted) select.value = wanted;
   else if (data?.default) select.value = data.default;
   updateModelBillingWarning();

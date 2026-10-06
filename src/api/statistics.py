@@ -42,6 +42,7 @@ async def statistics() -> dict[str, Any]:
                 "name": bot["name"],
                 "asset_class": snap.get("asset_class"),
                 "simulation_mode": snap.get("simulation_mode"),
+                "cursor_model": snap.get("cursor_model"),
                 "scheduler": sched,
                 "stats": stats["bots"].get(bot["id"]) or {},
             }

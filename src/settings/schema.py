@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 
-from src.cursor_models import DEFAULT_API_MODEL
+from src.cursor_models import DEFAULT_API_MODEL, normalize_cursor_model
 
 
 
@@ -182,7 +182,7 @@ class BotAppConfig(BaseModel):
 
     def strip_cursor_model(cls, v: str) -> str:
 
-        return str(v).strip()
+        return normalize_cursor_model(str(v))
 
 
 
@@ -212,7 +212,7 @@ class AppConfig(BaseModel):
 
     def strip_cursor_model(cls, v: str) -> str:
 
-        return str(v).strip()
+        return normalize_cursor_model(str(v))
 
 
 

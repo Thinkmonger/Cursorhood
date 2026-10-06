@@ -194,6 +194,52 @@ function schedulerBadgeClass(sched) {
   return "text-bg-primary";
 }
 
+const cursorModelLabels = { map: null, pending: null };
+
+function humanizeModelId(modelId) {
+  const id = String(modelId || "").trim();
+  if (!id) return "";
+  if (id === "default" || id === "auto") return "Auto";
+  const special = { gpt: "GPT", glm: "GLM" };
+  return id
+    .split("-")
+    .filter(Boolean)
+    .map((part) => {
+      const key = part.toLowerCase();
+      if (special[key]) return special[key];
+      return /^[a-z]/i.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part;
+    })
+    .join(" ");
+}
+
+function cursorModelLabel(modelId) {
+  const id = String(modelId || "").trim();
+  if (!id) return "";
+  return cursorModelLabels.map?.get(id) || humanizeModelId(id);
+}
+
+function loadCursorModelLabels() {
+  if (cursorModelLabels.map) return Promise.resolve(cursorModelLabels.map);
+  if (!cursorModelLabels.pending) {
+    cursorModelLabels.pending = api("/api/settings/cursor/models")
+      .then((data) => {
+        const map = new Map();
+        for (const group of data?.groups || []) {
+          for (const entry of group.models || []) {
+            if (entry?.id) map.set(String(entry.id), entry.label || entry.id);
+          }
+        }
+        cursorModelLabels.map = map;
+        return map;
+      })
+      .catch(() => {
+        cursorModelLabels.map = new Map();
+        return cursorModelLabels.map;
+      });
+  }
+  return cursorModelLabels.pending;
+}
+
 function assetClassBadge(assetClass) {
   const key = String(assetClass || "equity");
   const label = {

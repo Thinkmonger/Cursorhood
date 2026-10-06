@@ -197,7 +197,7 @@ async function refreshBots() {
   if (!grid) return;
 
   try {
-    const { bots } = await api("/api/bots");
+    const [{ bots }] = await Promise.all([api("/api/bots"), loadCursorModelLabels()]);
     grid.innerHTML = "";
 
     botCharts.forEach((chart) => chart.destroy());
@@ -227,7 +227,7 @@ async function refreshBots() {
         <div class="rh-card-head d-flex justify-content-between align-items-start gap-2">
           <div>
             <strong>${escapeHtml(b.name)}</strong>
-            <div class="small text-secondary">${escapeHtml(b.id)}</div>
+            <div class="small text-secondary">${escapeHtml(cursorModelLabel(b.cursor_model) || t("common.emDash"))}</div>
           </div>
           <div class="d-flex flex-wrap gap-1 justify-content-end">
             ${assetClassBadge(b.asset_class)}

@@ -4,15 +4,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from src.http_client import async_client
-
 DEFAULT_CURSOR_MODEL = "composer-2.5"
 
 # Back-compat alias used by settings schema and API responses.
 DEFAULT_API_MODEL = DEFAULT_CURSOR_MODEL
-
-CURSOR_MODELS_V0 = "https://api.cursor.com/v0/models"
-CURSOR_MODELS_V1 = "https://api.cursor.com/v1/models"
 
 GROUP_IDE = "ide"
 GROUP_API = "api"
@@ -32,6 +27,22 @@ _FALLBACK_MODELS: tuple[tuple[str, str], ...] = (
 _CACHE_TTL_SEC = 60.0
 _CACHE: dict[str, Any] | None = None
 _CACHE_AT = 0.0
+_VALID_IDS: frozenset[str] = frozenset()
+
+# REST /v0 slugs append these to a real model id. They are variant params, not ids.
+_VARIANT_SUFFIXES = (
+    "extra-high",
+    "xhigh",
+    "thinking",
+    "minimal",
+    "medium",
+    "high",
+    "fast",
+    "none",
+    "max",
+    "low",
+)
+
 
 _SUBSCRIPTION_MODEL_IDS = frozenset(
     {
@@ -65,7 +76,31 @@ def billing_for(model: str) -> str:
 
 
 def normalize_cursor_model(model: str) -> str:
-    return model.strip() or DEFAULT_CURSOR_MODEL
+    """Map a stored slug onto an id Cursor.models.list() accepts."""
+    raw = str(model or "").strip()
+    if not raw:
+        return DEFAULT_CURSOR_MODEL
+    if _VALID_IDS and raw in _VALID_IDS:
+        return raw
+    slug = raw[len("cursor-") :] if raw.startswith("cursor-") else raw
+    changed = True
+    while changed and slug:
+        changed = False
+        for token in _VARIANT_SUFFIXES:
+            suffix = f"-{token}"
+            if slug.endswith(suffix) and len(slug) > len(suffix):
+                slug = slug[: -len(suffix)]
+                changed = True
+                break
+    if _VALID_IDS and slug not in _VALID_IDS:
+        matches = [
+            model_id
+            for model_id in _VALID_IDS
+            if slug == model_id or slug.startswith(model_id + "-")
+        ]
+        if matches:
+            return max(matches, key=len)
+    return slug or DEFAULT_CURSOR_MODEL
 
 
 def subscription_model_warning(model: str) -> str | None:
@@ -93,20 +128,6 @@ def humanize_model_id(model_id: str) -> str:
         else:
             parts.append(raw[:1].upper() + raw[1:] if raw[:1].isalpha() else raw)
     return " ".join(parts) or model_id
-
-
-def _label_for(model_id: str, names: dict[str, str]) -> str:
-    if model_id in names:
-        return names[model_id]
-    best = ""
-    for family_id, name in names.items():
-        if model_id.startswith(family_id + "-") and len(family_id) > len(best):
-            best = family_id
-            suffix = humanize_model_id(model_id[len(family_id) + 1 :])
-            if suffix:
-                return f"{name} / {suffix}"
-            return name
-    return humanize_model_id(model_id)
 
 
 def _ide_sort_key(entry: dict[str, str]) -> tuple[int, str]:
@@ -158,62 +179,41 @@ def _fallback_entries() -> dict[str, dict[str, str]]:
     return entries
 
 
-def _add(entries: dict[str, dict[str, str]], model_id: str, *, label: str | None, names: dict[str, str]) -> None:
-    mid = str(model_id or "").strip()
-    if not mid:
-        return
-    resolved = label or _label_for(mid, names)
-    if mid not in entries:
-        entries[mid] = {"id": mid, "label": resolved, "billing": billing_for(mid)}
-        return
-    # Prefer a catalog display name over a slug-derived label.
-    current = entries[mid]["label"]
-    if label and (current == mid or current == humanize_model_id(mid)):
-        entries[mid]["label"] = label
-
-
 async def fetch_account_models(api_key: str | None = None) -> dict[str, Any]:
-    """List models available to the API key, grouped by IDE vs third-party API billing."""
-    global _CACHE, _CACHE_AT
+    """List models Cursor.models.list() accepts, grouped by IDE vs third-party API billing."""
+    global _CACHE, _CACHE_AT, _VALID_IDS
     if _CACHE is not None and (time.monotonic() - _CACHE_AT) < _CACHE_TTL_SEC:
         return _CACHE
 
-    entries = _fallback_entries()
-    names = {mid: label for mid, label in _FALLBACK_MODELS}
+    entries: dict[str, dict[str, str]] = {}
     error: str | None = None
     live = False
 
     if api_key:
         try:
-            async with async_client(timeout=15) as client:
-                headers = {"Authorization": f"Bearer {api_key}"}
-                v1 = await client.get(CURSOR_MODELS_V1, headers=headers)
-                if v1.status_code == 200:
-                    for item in (v1.json().get("items") or []):
-                        if not isinstance(item, dict):
-                            continue
-                        model_id = str(item.get("id") or "").strip()
-                        label = str(item.get("displayName") or "").strip()
-                        if not model_id:
-                            continue
-                        if label:
-                            names[model_id] = label
-                        _add(entries, model_id, label=label or None, names=names)
-                    live = True
-                v0 = await client.get(CURSOR_MODELS_V0, headers=headers)
-                if v0.status_code == 200:
-                    for item in v0.json().get("models") or []:
-                        _add(entries, str(item), label=None, names=names)
-                    live = True
-                elif not live:
-                    error = f"HTTP {v0.status_code}"
+            from cursor_sdk import Cursor
+
+            for model in Cursor.models.list(api_key=api_key):
+                model_id = str(model.id or "").strip()
+                if not model_id:
+                    continue
+                label = str(model.display_name or "").strip() or humanize_model_id(model_id)
+                entries[model_id] = {"id": model_id, "label": label, "billing": billing_for(model_id)}
+            if entries:
+                _VALID_IDS = frozenset(entries)
+                live = True
         except Exception as exc:
             error = str(exc)
+    else:
+        error = "No Cursor API key configured"
+
+    if not entries:
+        entries = _fallback_entries()
 
     payload = _payload(
         entries,
         ok=live,
-        error=error if api_key else (error or "No Cursor API key configured"),
+        error=None if live else error,
     )
     if live:
         _CACHE = payload

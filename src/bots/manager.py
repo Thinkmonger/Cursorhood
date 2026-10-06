@@ -78,10 +78,12 @@ class BotManager:
 
         settings = SettingsService(bot_id)
         limits = settings.read_limits()
+        app = settings.read_bot_app()
         return {
             **self.store.get_bot(bot_id),  # type: ignore[arg-type]
             "asset_class": limits.asset_class,
-            "simulation_mode": settings.read_bot_app().simulation_mode,
+            "simulation_mode": app.simulation_mode,
+            "cursor_model": app.cursor_model,
             "scheduler": {
                 "started": started,
                 "paused": paused,
