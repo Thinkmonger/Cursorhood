@@ -6,7 +6,7 @@ Cursor’s multi-agent setup is the point: you can run several bots at once and 
 
 You keep the process on your machine. The agents trade only in your **Agentic account** (separate from your main Robinhood portfolio), and only after the local risk hook allows the order.
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+See [DEMO.md](DEMO.md) for a walkthrough of the console, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## What you can do
 
