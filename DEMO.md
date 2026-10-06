@@ -24,7 +24,7 @@ Each card is one bot.
 
 **+ Add bot** creates another bot from an equities, options, or crypto template. The template seeds a strategy, limits, and cycle interval. You edit them after create.
 
-The footer is the whole console, not one bot. **Stack** is what the app is built with. The usage line counts cloud agents, bot cycles today, MCP calls, and Cursor runs linked to those cycles. **Last run** is the most recent cycle status across bots. In this shot it is **Error**, which matches failed cycles visible on the bot pages (an invalid model id, or a run the server interrupted).
+The footer is the whole console, not one bot. **Stack** is what the app is built with. **App** is the product name, version, a link to the GitHub repo, and a Venmo link for Lee. This screenshot still shows the older usage line (cycles, MCP calls, and last-run status). Those counts now live on the Statistics page.
 
 ### Configuration
 

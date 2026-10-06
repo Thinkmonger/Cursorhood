@@ -541,6 +541,16 @@ a.app-footer-badge:hover {
   color: #9aa8ba;
 }
 
+.app-footer-stats a {
+  color: #9aa8ba;
+  text-decoration: none;
+}
+
+.app-footer-stats a:hover {
+  color: #e7ecf3;
+  text-decoration: underline;
+}
+
 .app-footer-stat .label {
   color: #6c7a8f;
   font-weight: 600;

@@ -42,6 +42,31 @@ _QUOTA_NOTE = (
 )
 _QUOTA_URL = "https://cursor.com/settings"
 
+GITHUB_URL = "https://github.com/Thinkmonger/Cursorhood"
+VENMO_URL = "https://venmo.com/code?user_id=3116446615863296136&created=1789922505"
+
+
+def app_version() -> str:
+    """Project version from pyproject.toml. Installed metadata can lag an editable checkout."""
+    try:
+        import tomllib
+
+        from src.paths import PROJECT_ROOT
+
+        data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        return str(data["project"]["version"])
+    except Exception:
+        return "0.2.0"
+
+
+def app_info() -> dict[str, str]:
+    return {
+        "name": "Cursorhood",
+        "version": app_version(),
+        "github_url": GITHUB_URL,
+        "venmo_url": VENMO_URL,
+    }
+
 
 def _mask_email(email: str | None) -> str | None:
     if not email or "@" not in email:
@@ -239,6 +264,7 @@ async def get_footer_info() -> dict[str, Any]:
     cursor = await _cached_cursor_account(api_key)
     return {
         "technologies": TECHNOLOGIES,
+        "app": app_info(),
         "local": local,
         "cursor": cursor,
         "as_of": time.time(),
