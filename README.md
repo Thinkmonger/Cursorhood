@@ -246,7 +246,9 @@ AGENTS.md            Agent playbook for automated cycles
 
 ## Support this project
 
-This console is free and local. Two easy ways to help if it is useful:
+The source in this repository stays free under the MIT license, including the `v0.2.0` tag. A packaged Windows build is sold separately for **$79** once. That paid line is developed in private, already contains Python and the Cursor bridge, and is not published on this branch. The purchase link is a Stripe Payment Link created from the seller’s Stripe account. Venmo below is a tip, not the purchase.
+
+Two easy ways to support the free console:
 
 **Open a Robinhood account with this referral.** New users who sign up at [join.robinhood.com/laurenw275](https://join.robinhood.com/laurenw275) can claim a **$5–$200 stock reward** (you are guaranteed at least $5 after linking a bank; 1 in 100 get $20, and 1 in 1,000 get $200 — [terms apply](https://join.robinhood.com/laurenw275)). You pick from a set of leading companies. For the signup to count as a referral you need to add money to the account. That also funds the Agentic account this console trades in.
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+Public `main` stays MIT. The `v0.2.0` tag is the named MIT release of this free console. The paid Windows build is developed on a private branch and is not part of this tag.
+
+## [0.2.0] - 2026-10-06
+
 ### Added
 
 - **Cursorhood** — user-facing product name is **Cursorhood Agentic Trading Console** (short: **Cursorhood**). The footer stack badge and OAuth/keyring identities stay **Robinhood Agentic**.
