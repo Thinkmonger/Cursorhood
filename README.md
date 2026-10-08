@@ -1,6 +1,6 @@
 # Cursorhood Agentic Trading Console
 
-![RobinBot dashboard: simulated crypto portfolio, price charts, holdings, and recent runs](web/images/demo/RobinBot-Crypto-Bot-Overview.png)
+![Dashboard overview: four bot cards with portfolio values, run counts, and scheduler controls](web/images/demo/Dashboard-Overview-Cursorhood.png)
 
 **Cursorhood Agentic Trading Console** is a local web console for [Robinhood Agentic Trading](https://robinhood.com/us/en/agentic-trading). It runs [Cursor](https://cursor.com) agents against the official Robinhood MCP server at `https://agent.robinhood.com/mcp/trading`, with a dashboard, risk limits, paper trading, and optional extra market data.
 
